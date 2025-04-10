@@ -36,11 +36,15 @@ def fetch_trace_data(es, index_name, time_range_hours=24, max_docs=10000):
         "size": max_docs,
         "_source": [
             "@timestamp", 
-            "latency_seconds", 
-            "http.url", 
-            "error", 
-            "resource.service.name",
-            "success_rate"
+            "EndTimestamp",
+            "Name",
+            "Attributes.*",
+            "Resource.*",
+            "Kind",
+            "TraceId",
+            "SpanId",
+            "ParentSpanId",
+            "TraceStatus"
         ]
     }
     
@@ -64,32 +68,132 @@ def process_trace_data(response):
         print("No data to process")
         return None
     
+    print("Processing trace data...")
+    
+    # First, get a sample document to understand the structure
+    if len(response['hits']['hits']) > 0:
+        sample = response['hits']['hits'][0]['_source']
+        print(f"Sample document keys: {list(sample.keys())}")
+    
+    api_call_spans = []
+    process_data_spans = []
+    call_spans = []
+    
+    # First pass - categorize spans
     for hit in response['hits']['hits']:
         source = hit['_source']
+        span_name = source.get('Name', '')
         
-        # Extract span data
-        if 'latency_seconds' in source:
+        if span_name == 'api_call':
+            api_call_spans.append(source)
+        elif span_name == 'process_data':
+            process_data_spans.append(source)
+        elif span_name.startswith('call_'):
+            call_spans.append(source)
+    
+    print(f"Found {len(api_call_spans)} api_call spans, {len(process_data_spans)} process_data spans, and {len(call_spans)} call_X spans")
+    
+    # Extract latency information
+    for span in api_call_spans:
+        try:
+            # Calculate latency from timestamps if available
+            start_time = datetime.fromisoformat(span.get('@timestamp', '').replace('Z', '+00:00'))
+            end_time = datetime.fromisoformat(span.get('EndTimestamp', '').replace('Z', '+00:00'))
+            
+            # Calculate duration in seconds
+            latency = (end_time - start_time).total_seconds()
+            
+            # Get associated trace and parent span info
+            trace_id = span.get('TraceId', '')
+            span_id = span.get('SpanId', '')
+            parent_span_id = span.get('ParentSpanId', '')
+            
+            # Look for error attributes (in our app, we set error=true for failed calls)
+            error = False
+            error_type = None
+            
+            # Check for error indicators in all possible attribute fields
+            for key, value in span.items():
+                if key.startswith('Attributes.error'):
+                    error = True
+                if key.startswith('Attributes.error.type'):
+                    error_type = value
+            
+            # Check if the span has a non-zero TraceStatus
+            if span.get('TraceStatus', 0) != 0:
+                error = True
+            
             entry = {
-                'timestamp': source.get('@timestamp'),
-                'latency': source.get('latency_seconds'),
-                'url': source.get('http.url', ''),
-                'error': 1 if source.get('error', False) else 0,
-                'service': source.get('resource.service.name', 'unknown'),
-                'success_rate': source.get('success_rate', 1.0)
+                'timestamp': start_time,
+                'latency': latency,
+                'trace_id': trace_id,
+                'span_id': span_id,
+                'parent_span_id': parent_span_id,
+                'error': 1 if error else 0,
+                'error_type': error_type,
+                'service': span.get('Resource.service.name', 'unknown')
             }
+            
+            # Add any other attributes we find
+            for key, value in span.items():
+                if key.startswith('Attributes.'):
+                    attr_name = key.replace('Attributes.', '')
+                    if attr_name not in entry:
+                        entry[attr_name] = value
+            
             data.append(entry)
+        except Exception as e:
+            print(f"Error processing span: {e}")
+            continue
     
     if not data:
-        print("No usable data found in the response")
+        # If we couldn't find api_call spans with latency, try to extract durations from all spans
+        print("No api_call spans with latency found. Trying to extract duration from all spans...")
+        for hit in response['hits']['hits']:
+            source = hit['_source']
+            try:
+                # Calculate latency from timestamps if available
+                if '@timestamp' in source and 'EndTimestamp' in source:
+                    start_time = datetime.fromisoformat(source['@timestamp'].replace('Z', '+00:00'))
+                    end_time = datetime.fromisoformat(source['EndTimestamp'].replace('Z', '+00:00'))
+                    
+                    # Calculate duration in seconds
+                    latency = (end_time - start_time).total_seconds()
+                    
+                    entry = {
+                        'timestamp': start_time,
+                        'latency': latency,
+                        'span_name': source.get('Name', 'unknown'),
+                        'trace_id': source.get('TraceId', ''),
+                        'error': 1 if source.get('TraceStatus', 0) != 0 else 0,
+                        'service': source.get('Resource.service.name', 'unknown')
+                    }
+                    
+                    # Add any other attributes we find
+                    for key, value in source.items():
+                        if key.startswith('Attributes.'):
+                            attr_name = key.replace('Attributes.', '')
+                            if attr_name not in entry:
+                                entry[attr_name] = value
+                    
+                    data.append(entry)
+            except Exception as e:
+                print(f"Error processing span: {e}")
+                continue
+    
+    if not data:
+        print("No usable latency data found in the response")
         return None
     
     # Convert to DataFrame
     df = pd.DataFrame(data)
-    if 'timestamp' in df.columns:
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.sort_values('timestamp')
     
-    print(f"Processed {len(df)} data points")
+    print(f"Processed {len(df)} data points with latency information")
+    
+    if len(df) > 0:
+        print(f"Data columns: {df.columns.tolist()}")
+        print(f"Latency statistics: Min={df['latency'].min():.4f}s, Max={df['latency'].max():.4f}s, Avg={df['latency'].mean():.4f}s")
+    
     return df
 
 def detect_latency_anomalies(df, contamination=0.05):
@@ -189,7 +293,7 @@ def visualize_anomalies(df, output_dir='./'):
         latency_anomalies = df[df['latency_anomaly'] == 1]
         if len(latency_anomalies) > 0:
             print("\nLatency Anomalies:")
-            print(latency_anomalies[['timestamp', 'latency', 'url', 'error']].head(10))
+            print(latency_anomalies[['timestamp', 'latency', 'trace_id', 'span_id', 'parent_span_id', 'error', 'error_type']].head(10))
     
     if 'error_rate_anomaly' in df.columns:
         error_anomalies = df[df['error_rate_anomaly'] == 1]
