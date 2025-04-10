@@ -12,6 +12,11 @@ processors:
 exporters:
   elasticsearch:
     endpoints: ["http://elasticsearch:9200"]
+    logs_index: "logs"
+    traces_index: "traces"
+    metrics_index: "metrics"
+    create_index_templates: true
+    
 
 service:
   pipelines:
@@ -28,4 +33,4 @@ service:
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [elasticsearch]
+      exporters: [elasticsearch] 
