@@ -1,0 +1,219 @@
+version: '3.8'
+
+services:
+  # Observability Infrastructure
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.9.0
+    container_name: otel-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    networks:
+      - otel-network
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.9.0
+    container_name: otel-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - otel-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - otel-network
+    depends_on:
+      - otel-collector
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.80.0
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config-simplified.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Metrics
+      - "8889:8889"   # Prometheus exporter
+    depends_on:
+      - elasticsearch
+    networks:
+      - otel-network
+
+  # Cloud Environment APIs
+  payment-api:
+    image: python:3.9-slim
+    container_name: payment-api
+    working_dir: /app
+    command: >
+      bash -c "pip install --no-cache-dir -r requirements-api.txt && python api_service.py"
+    environment:
+      - API_NAME=payment
+      - API_ENVIRONMENT=cloud
+      - API_URL=http://payment-api:8000/process
+      - AVG_LATENCY=0.3
+      - ERROR_RATE=0.05
+      - OTEL_COLLECTOR_ENDPOINT=http://otel-collector:4318/v1/traces
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./api_service_full.py:/app/api_service.py
+      - ./requirements-api.txt:/app/requirements-api.txt
+    networks:
+      - otel-network
+    depends_on:
+      - otel-collector
+
+  order-api:
+    image: python:3.9-slim
+    container_name: order-api
+    working_dir: /app
+    command: >
+      bash -c "pip install --no-cache-dir -r requirements-api.txt && python api_service.py"
+    environment:
+      - API_NAME=order
+      - API_ENVIRONMENT=cloud
+      - API_URL=http://order-api:8000/submit
+      - AVG_LATENCY=0.4
+      - ERROR_RATE=0.07
+      - OTEL_COLLECTOR_ENDPOINT=http://otel-collector:4318/v1/traces
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./api_service_full.py:/app/api_service.py
+      - ./requirements-api.txt:/app/requirements-api.txt
+    networks:
+      - otel-network
+    depends_on:
+      - otel-collector
+
+  # On-Premise Environment API
+  inventory-api:
+    image: python:3.9-slim
+    container_name: inventory-api
+    working_dir: /app
+    command: >
+      bash -c "pip install --no-cache-dir -r requirements-api.txt && python api_service.py"
+    environment:
+      - API_NAME=inventory
+      - API_ENVIRONMENT=on-premise
+      - API_URL=http://inventory-api:8000/check
+      - AVG_LATENCY=0.5
+      - ERROR_RATE=0.08
+      - OTEL_COLLECTOR_ENDPOINT=http://otel-collector:4318/v1/traces
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8003:8000"
+    volumes:
+      - ./api_service_full.py:/app/api_service.py
+      - ./requirements-api.txt:/app/requirements-api.txt
+    networks:
+      - otel-network
+    depends_on:
+      - otel-collector
+
+  # Multi-Cloud Environment API
+  user-api:
+    image: python:3.9-slim
+    container_name: user-api
+    working_dir: /app
+    command: >
+      bash -c "pip install --no-cache-dir -r requirements-api.txt && python api_service.py"
+    environment:
+      - API_NAME=user
+      - API_ENVIRONMENT=multi-cloud
+      - API_URL=http://user-api:8000/profile
+      - AVG_LATENCY=0.2
+      - ERROR_RATE=0.03
+      - OTEL_COLLECTOR_ENDPOINT=http://otel-collector:4318/v1/traces
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8004:8000"
+    volumes:
+      - ./api_service_full.py:/app/api_service.py
+      - ./requirements-api.txt:/app/requirements-api.txt
+    networks:
+      - otel-network
+    depends_on:
+      - otel-collector
+      
+  # Journey Simulator
+  journey-simulator:
+    image: python:3.9-slim
+    container_name: journey-simulator
+    working_dir: /app
+    command: >
+      bash -c "pip install --no-cache-dir -r requirements-simulator.txt && python journey_simulator.py"
+    environment:
+      - PAYMENT_API_URL=http://payment-api:8000/process
+      - ORDER_API_URL=http://order-api:8000/submit
+      - INVENTORY_API_URL=http://inventory-api:8000/check 
+      - USER_API_URL=http://user-api:8000/profile
+      - OTEL_COLLECTOR_ENDPOINT=http://otel-collector:4318/v1/traces
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./journey_simulator.py:/app/journey_simulator.py
+      - ./requirements-simulator.txt:/app/requirements-simulator.txt
+    networks:
+      - otel-network
+    depends_on:
+      - payment-api
+      - order-api
+      - inventory-api
+      - user-api
+
+  # Anomaly Detection Service with ML prediction
+  anomaly-detector:
+    image: python:3.9-slim
+    container_name: anomaly-detector
+    working_dir: /app
+    command: >
+      bash -c "
+        apt-get update && 
+        apt-get install -y libgl1-mesa-glx libglib2.0-0 && 
+        pip install --no-cache-dir -r requirements-anomaly.txt && 
+        python anomaly_detector.py --continuous --interval 300 --output-dir /app/anomaly_results --host elasticsearch --port 9200
+      "
+    environment:
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - CONTINUOUS_ANALYSIS=true
+      - ANALYSIS_INTERVAL=300
+      - ENABLE_PREDICTION=true
+      - PREDICTION_HORIZON=24
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./anomaly_detector.py:/app/anomaly_detector.py
+      - ./anomaly_results:/app/anomaly_results
+      - ./requirements-anomaly.txt:/app/requirements-anomaly.txt
+    networks:
+      - otel-network
+    depends_on:
+      - elasticsearch
+
+volumes:
+  esdata:
+    driver: local
+
+networks:
+  otel-network:
+    driver: bridge 

@@ -1,0 +1,25 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install dependencies for Matplotlib
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install dependencies
+COPY requirements-anomaly.txt .
+RUN pip install --no-cache-dir -r requirements-anomaly.txt
+
+# Copy application code
+COPY anomaly_detector.py .
+
+# Create directory for results
+RUN mkdir -p /app/anomaly_results
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+
+# Run the anomaly detector with continuous monitoring
+CMD ["python", "anomaly_detector.py", "--continuous", "--interval", "300", "--output-dir", "/app/anomaly_results"] 

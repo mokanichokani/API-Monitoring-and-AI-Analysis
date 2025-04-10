@@ -1,0 +1,48 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1000
+  resource:
+    attributes:
+      - key: monitoring.system
+        value: otel-api-monitoring
+        action: upsert
+
+exporters:
+  elasticsearch:
+    endpoints: [http://elasticsearch:9200]
+  
+  logging:
+    loglevel: debug
+    
+  prometheus:
+    endpoint: 0.0.0.0:8889
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [elasticsearch, logging]
+      
+    logs:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [elasticsearch, logging]
+
+    metrics:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [prometheus, logging]
+  
+  telemetry:
+    logs:
+      level: "debug" 
