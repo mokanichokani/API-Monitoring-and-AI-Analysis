@@ -1,0 +1,17 @@
+apm-server:
+  host: "0.0.0.0:8200"
+
+  otlp:
+    enabled: true
+    grpc:
+      enabled: true
+      host: "0.0.0.0:4317"
+    http:
+      enabled: true
+      host: "0.0.0.0:4318"
+
+output.elasticsearch:
+  hosts: ["http://localhost:9200"]
+  # remove if using security
+  username: "elastic"
+  password: "changeme"
