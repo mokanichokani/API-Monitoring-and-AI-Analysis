@@ -1,0 +1,17 @@
+# OpenTelemetry requirements
+opentelemetry-api==1.19.0
+opentelemetry-sdk==1.19.0
+opentelemetry-exporter-otlp==1.19.0
+opentelemetry-exporter-otlp-proto-http==1.19.0
+opentelemetry-semantic-conventions==0.40b0
+
+# Data processing and anomaly detection
+pandas>=1.5.0
+numpy>=1.23.0
+scikit-learn>=1.2.0
+matplotlib>=3.6.0
+elasticsearch>=8.9.0
+
+# HTTP and serialization
+requests>=2.27.1
+protobuf==4.24.3 
