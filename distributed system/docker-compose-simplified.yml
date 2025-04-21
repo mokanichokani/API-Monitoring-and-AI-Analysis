@@ -16,6 +16,11 @@ services:
       - esdata:/usr/share/elasticsearch/data
     networks:
       - otel-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   kibana:
     image: docker.elastic.co/kibana/kibana:8.9.0
@@ -25,7 +30,8 @@ services:
     ports:
       - "5601:5601"
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     networks:
       - otel-network
 
@@ -53,7 +59,8 @@ services:
       - "8888:8888"   # Metrics
       - "8889:8889"   # Prometheus exporter
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     networks:
       - otel-network
 
@@ -71,6 +78,9 @@ services:
       - AVG_LATENCY=0.3
       - ERROR_RATE=0.05
       - OTEL_COLLECTOR_ENDPOINT=http://otel-collector:4318/v1/traces
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ES_INDEX_PREFIX=logs-otel
+      - ES_AUTO_FALLBACK=false
       - PYTHONUNBUFFERED=1
     ports:
       - "8001:8000"
@@ -80,7 +90,10 @@ services:
     networks:
       - otel-network
     depends_on:
-      - otel-collector
+      elasticsearch:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
 
   order-api:
     image: python:3.9-slim
@@ -95,6 +108,9 @@ services:
       - AVG_LATENCY=0.4
       - ERROR_RATE=0.07
       - OTEL_COLLECTOR_ENDPOINT=http://otel-collector:4318/v1/traces
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ES_INDEX_PREFIX=logs-otel
+      - ES_AUTO_FALLBACK=false
       - PYTHONUNBUFFERED=1
     ports:
       - "8002:8000"
@@ -104,7 +120,10 @@ services:
     networks:
       - otel-network
     depends_on:
-      - otel-collector
+      elasticsearch:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
 
   # On-Premise Environment API
   inventory-api:
@@ -120,6 +139,9 @@ services:
       - AVG_LATENCY=0.5
       - ERROR_RATE=0.08
       - OTEL_COLLECTOR_ENDPOINT=http://otel-collector:4318/v1/traces
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ES_INDEX_PREFIX=logs-otel
+      - ES_AUTO_FALLBACK=false
       - PYTHONUNBUFFERED=1
     ports:
       - "8003:8000"
@@ -129,7 +151,10 @@ services:
     networks:
       - otel-network
     depends_on:
-      - otel-collector
+      elasticsearch:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
 
   # Multi-Cloud Environment API
   user-api:
@@ -145,6 +170,9 @@ services:
       - AVG_LATENCY=0.2
       - ERROR_RATE=0.03
       - OTEL_COLLECTOR_ENDPOINT=http://otel-collector:4318/v1/traces
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ES_INDEX_PREFIX=logs-otel
+      - ES_AUTO_FALLBACK=false
       - PYTHONUNBUFFERED=1
     ports:
       - "8004:8000"
@@ -154,7 +182,10 @@ services:
     networks:
       - otel-network
     depends_on:
-      - otel-collector
+      elasticsearch:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
       
   # Journey Simulator
   journey-simulator:
@@ -189,7 +220,7 @@ services:
     command: >
       bash -c "
         apt-get update && 
-        apt-get install -y libgl1-mesa-glx libglib2.0-0 && 
+        apt-get install -y libgl1-mesa-glx libglib2.0-0 curl && 
         pip install --no-cache-dir -r requirements-anomaly.txt && 
         python anomaly_detector.py --continuous --interval 300 --output-dir /app/anomaly_results --host elasticsearch --port 9200
       "
@@ -208,7 +239,8 @@ services:
     networks:
       - otel-network
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
 
 volumes:
   esdata:

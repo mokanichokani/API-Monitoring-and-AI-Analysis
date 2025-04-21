@@ -20,7 +20,8 @@ exporters:
   elasticsearch:
     endpoints: [http://elasticsearch:9200]
     traces_index: traces-otel
-  
+    logs_index: logs-otel  # Add a logs index for Elasticsearch
+
   logging:
     loglevel: debug
     
@@ -38,7 +39,12 @@ service:
       receivers: [otlp]
       processors: [batch, resource]
       exporters: [prometheus, logging]
+
+    logs:  # Add a logs pipeline
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [elasticsearch, logging]
   
   telemetry:
     logs:
-      level: "debug" 
+      level: "debug"

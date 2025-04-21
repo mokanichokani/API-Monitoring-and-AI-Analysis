@@ -3,11 +3,16 @@ import os
 import time
 import random
 import logging
-from datetime import datetime
+import socket
+from datetime import datetime, timezone
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 import uvicorn
 import uuid
+import json
+import requests
+from elasticsearch import Elasticsearch, exceptions as es_exceptions
+from logging.handlers import RotatingFileHandler
 
 # OpenTelemetry imports
 from opentelemetry import trace
@@ -15,12 +20,6 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource, SERVICE_NAMESPACE
-
-# OpenTelemetry logs
-from opentelemetry import _logs
-from opentelemetry.sdk import _logs as logs_sdk
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 
 # OpenTelemetry metrics
 from opentelemetry.metrics import get_meter_provider, set_meter_provider
@@ -30,12 +29,15 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExp
 
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Define a minimal version of the severity number for our logs
+class MySeverityNumber:
+    UNSPECIFIED = 0
+    TRACE = 1
+    DEBUG = 5
+    INFO = 9
+    WARN = 13
+    ERROR = 17
+    FATAL = 21
 
 # Get service configuration from environment variables
 API_NAME = os.getenv("API_NAME", "generic")
@@ -44,6 +46,232 @@ API_URL = os.getenv("API_URL", "http://localhost:8000")
 AVG_LATENCY = float(os.getenv("AVG_LATENCY", "0.3"))
 ERROR_RATE = float(os.getenv("ERROR_RATE", "0.05"))
 OTEL_COLLECTOR_ENDPOINT = os.getenv("OTEL_COLLECTOR_ENDPOINT", "http://localhost:4318/v1/traces")
+ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200")  # Match docker-compose service name
+LOG_FILE_PATH = os.getenv("LOG_FILE_PATH", f"logs/{API_NAME}_api.log")
+ES_INDEX_PREFIX = os.getenv("ES_INDEX_PREFIX", "logs-otel")
+ES_MAX_RETRIES = int(os.getenv("ES_MAX_RETRIES", "5"))
+ES_RETRY_INTERVAL = int(os.getenv("ES_RETRY_INTERVAL", "5"))
+ES_AUTO_FALLBACK = os.getenv("ES_AUTO_FALLBACK", "false").lower() == "true"  # Disabled by default
+
+# Ensure log directory exists
+os.makedirs(os.path.dirname(LOG_FILE_PATH), exist_ok=True)
+
+# Configure file logging
+file_handler = RotatingFileHandler(
+    LOG_FILE_PATH,
+    maxBytes=10_000_000,  # 10MB
+    backupCount=5
+)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+# Configure console logging
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+# Configure root logger
+logging.basicConfig(
+    level=logging.DEBUG,  # Change to DEBUG to see more logs
+    handlers=[file_handler, console_handler]
+)
+logger = logging.getLogger(__name__)
+
+# Helper function to resolve hostname
+def resolve_hostname(hostname):
+    """Try to resolve a hostname and return first IP address if possible"""
+    try:
+        return socket.gethostbyname(hostname)
+    except socket.gaierror:
+        return None
+
+# Create a custom Elasticsearch logger (based on our standalone es_logger.py)
+class ElasticsearchLogger:
+    """Simple logger that writes logs to both console and Elasticsearch"""
+    
+    def __init__(self, 
+                 es_url="http://elasticsearch:9200", 
+                 index_name="logs-otel",
+                 service_name="api-service", 
+                 environment="default",
+                 auto_fallback=False):
+        """Initialize the Elasticsearch logger"""
+        self.es_url = es_url
+        self.index_name = index_name
+        self.service_name = service_name
+        self.environment = environment
+        self.auto_fallback = auto_fallback
+        self.es_client = None
+        self.es_ready = False
+        
+        # Docker DNS to IP address resolution can take time
+        # We'll use just the Docker service name with high retry settings
+        logger.info(f"Initializing Elasticsearch logger with URL: {self.es_url}")
+        
+        # Try to connect to Elasticsearch with retries
+        self._init_elasticsearch(max_retries=ES_MAX_RETRIES)
+    
+    def _init_elasticsearch(self, retry_count=0, max_retries=5):
+        """Initialize connection to Elasticsearch with retry logic"""
+        if retry_count >= max_retries:
+            logger.error(f"Failed to connect to Elasticsearch at {self.es_url} after {max_retries} attempts")
+            return False
+        
+        try:
+            # Test if Elasticsearch is reachable
+            try:
+                logger.info(f"Attempt {retry_count+1}/{max_retries}: Connecting to Elasticsearch at {self.es_url}...")
+                response = requests.get(f"{self.es_url}/_cluster/health", timeout=10)
+                logger.info(f"Elasticsearch health response: {response.status_code} - {response.text[:100]}")
+            except Exception as e:
+                logger.warning(f"Elasticsearch health check failed: {e}. Will still try to connect with the client.")
+            
+            # Connect to Elasticsearch with longer timeouts for Docker networking
+            self.es_client = Elasticsearch(
+                self.es_url, 
+                request_timeout=60,  # Longer timeout
+                retry_on_timeout=True, 
+                max_retries=3  # More retries
+            )
+            
+            # Get cluster info
+            es_info = self.es_client.info()
+            logger.info(f"Connected to Elasticsearch at {self.es_url}, version: {es_info.get('version', {}).get('number', 'unknown')}")
+            
+            # Create index if it doesn't exist
+            if not self.es_client.indices.exists(index=self.index_name):
+                logger.info(f"Creating index {self.index_name}")
+                self.es_client.indices.create(
+                    index=self.index_name,
+                    settings={
+                        "number_of_shards": 1,
+                        "number_of_replicas": 1
+                    },
+                    mappings={
+                        "properties": {
+                            "timestamp": {"type": "date"},
+                            "message": {"type": "text"},
+                            "severity": {"type": "keyword"},
+                            "service": {"type": "keyword"},
+                            "environment": {"type": "keyword"},
+                            "attributes": {"type": "object", "dynamic": True}
+                        }
+                    }
+                )
+                logger.info(f"Successfully created index {self.index_name}")
+            
+            # Test indexing a document
+            test_doc = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "message": f"Test document from {self.service_name} service startup",
+                "severity": "INFO",
+                "service": self.service_name,
+                "environment": self.environment,
+                "attributes": {"test": True}
+            }
+            
+            # Try with forced refresh
+            result = self.es_client.index(
+                index=self.index_name, 
+                document=test_doc,
+                refresh="true"  # Force immediate refresh
+            )
+            logger.info(f"Test document indexed: {result}")
+            
+            # If we get here, connection is good
+            self.es_ready = True
+            logger.info(f"Successfully connected to Elasticsearch at {self.es_url}")
+            return True
+            
+        except (es_exceptions.ConnectionError, es_exceptions.TransportError, requests.exceptions.RequestException) as e:
+            logger.warning(f"Elasticsearch connection attempt {retry_count+1} failed: {e}")
+            time.sleep(ES_RETRY_INTERVAL)  # Wait before retry
+            return self._init_elasticsearch(retry_count + 1, max_retries)
+            
+        except Exception as e:
+            logger.error(f"Unexpected error connecting to Elasticsearch: {str(e)}")
+            return False
+    
+    def log(self, message, severity="INFO", attributes=None):
+        """Log a message to Elasticsearch and console"""
+        log_id = str(uuid.uuid4())
+        timestamp = datetime.now(timezone.utc).isoformat()
+        log_attrs = attributes or {}
+        
+        # Add some common fields
+        log_attrs["log_id"] = log_id
+        
+        # Write to console log
+        log_message = f"{message} - Attributes: {json.dumps(log_attrs)}"
+        if severity.upper() == "INFO":
+            logger.info(log_message)
+        elif severity.upper() == "ERROR":
+            logger.error(log_message)
+        elif severity.upper() == "WARNING":
+            logger.warning(log_message)
+        
+        # Send to Elasticsearch if available
+        if self.es_client and self.es_ready:
+            log_doc = {
+                "timestamp": timestamp,
+                "message": message,
+                "severity": severity,
+                "service": self.service_name,
+                "environment": self.environment,
+                "attributes": log_attrs
+            }
+            try:
+                # Explicitly log the document we're sending
+                logger.debug(f"Sending to Elasticsearch: {json.dumps(log_doc)}")
+                
+                # Index the document and capture the result
+                # Add refresh=True to force immediate refresh
+                result = self.es_client.index(
+                    index=self.index_name, 
+                    document=log_doc,
+                    refresh="true"  # Force Elasticsearch to refresh the index immediately
+                )
+                
+                # Log success at DEBUG level (won't clutter console in normal operation)
+                if result and result.get('_id'):
+                    logger.debug(f"Successfully indexed document with ID: {result.get('_id')}")
+                else:
+                    logger.warning(f"Document indexed but no ID returned: {result}")
+                    
+            except Exception as e:
+                logger.error(f"Failed to send log to Elasticsearch: {e}")
+                # Try to reconnect for future logs
+                if "ConnectionError" in str(e) or "TransportError" in str(e):
+                    self.es_ready = False
+                    # We need to reconnect - set debug level to higher to see what's happening
+                    logger.warning(f"Connection to Elasticsearch lost, attempting to reconnect")
+                    self._init_elasticsearch()
+        else:
+            # Log if we have a client but it's not ready
+            if self.es_client and not self.es_ready:
+                logger.warning(f"Not sending to Elasticsearch: client exists but not ready")
+            elif not self.es_client:
+                logger.warning(f"Not sending to Elasticsearch: no client available")
+                # Try to reconnect
+                if not self._init_elasticsearch():
+                    logger.error("Failed to reconnect to Elasticsearch")
+    
+    def close(self):
+        """Close the Elasticsearch connection"""
+        if self.es_client:
+            self.es_client.close()
+            logger.info("Elasticsearch connection closed")
+
+# Add a debug log right before we create the ElasticsearchLogger to see environment variables
+logger.info(f"Creating Elasticsearch logger with URL: {ELASTICSEARCH_URL}, index: {ES_INDEX_PREFIX}")
+logger.info(f"Service name: {API_NAME}, environment: {API_ENVIRONMENT}")
+
+# Initialize our custom Elasticsearch logger
+es_logger = ElasticsearchLogger(
+    es_url=ELASTICSEARCH_URL,
+    index_name=ES_INDEX_PREFIX,
+    service_name=API_NAME,
+    environment=API_ENVIRONMENT,
+    auto_fallback=ES_AUTO_FALLBACK
+)
 
 # Configure OpenTelemetry resource
 resource = Resource(attributes={
@@ -53,7 +281,7 @@ resource = Resource(attributes={
     "api.name": API_NAME
 })
 
-# Set up trace provider
+# Set up trace provider (keep using OpenTelemetry for tracing)
 tracer_provider = TracerProvider(resource=resource)
 trace.set_tracer_provider(tracer_provider)
 
@@ -61,25 +289,15 @@ trace.set_tracer_provider(tracer_provider)
 otlp_trace_exporter = OTLPSpanExporter(endpoint=OTEL_COLLECTOR_ENDPOINT)
 tracer_provider.add_span_processor(BatchSpanProcessor(otlp_trace_exporter))
 
-# Set up logs provider
-logger_provider = logs_sdk.LoggerProvider(resource=resource)
-_logs.set_logger_provider(logger_provider)
-
-# Configure logs exporter
-logs_endpoint = OTEL_COLLECTOR_ENDPOINT.replace("/traces", "/logs")
-otlp_log_exporter = OTLPLogExporter(endpoint=logs_endpoint)
-logger_provider.add_log_record_processor(BatchLogRecordProcessor(otlp_log_exporter))
-
-# Set up metrics provider
+# Set up metrics provider (keep using OpenTelemetry for metrics)
 metrics_endpoint = OTEL_COLLECTOR_ENDPOINT.replace("/traces", "/metrics")
 metric_exporter = OTLPMetricExporter(endpoint=metrics_endpoint)
 metric_reader = PeriodicExportingMetricReader(metric_exporter, export_interval_millis=15000)
 meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
 set_meter_provider(meter_provider)
 
-# Get a tracer, logger and meter
+# Get a tracer and meter
 tracer = trace.get_tracer(__name__)
-otel_logger = logger_provider.get_logger(__name__)
 meter = get_meter_provider().get_meter(__name__)
 
 # Create metrics
@@ -101,28 +319,14 @@ latency_histogram = meter.create_histogram(
     unit="s",
 )
 
-# Helper function for creating log records
+# Helper function for creating log records (now using our custom logger)
 def create_log_record(message, severity, attributes=None):
+    """Create a log record using our custom Elasticsearch logger"""
     try:
-        if severity.upper() == "INFO":
-            severity_num = logs_sdk.SeverityNumber.INFO
-        elif severity.upper() == "ERROR":
-            severity_num = logs_sdk.SeverityNumber.ERROR
-        elif severity.upper() == "WARNING":
-            severity_num = logs_sdk.SeverityNumber.WARN
-        else:
-            severity_num = logs_sdk.SeverityNumber.UNSPECIFIED
-        
-        return logs_sdk.LogRecord(
-            timestamp=int(time.time() * 1_000_000_000),  # nanoseconds
-            severity_number=severity_num,
-            severity_text=severity,
-            body=message,
-            attributes=attributes or {}
-        )
+        # Use our custom logger
+        es_logger.log(message, severity, attributes)
     except Exception as e:
         logger.error(f"Error creating log record: {e}")
-        return None
 
 # Create FastAPI app
 app = FastAPI(title=f"{API_NAME.capitalize()} API")
@@ -161,7 +365,7 @@ async def add_api_attributes(request: Request, call_next):
         request.state.step_name = step_name
     
     # Log the request start
-    log_record = create_log_record(
+    create_log_record(
         f"Started {request.method} {request.url.path}",
         "INFO",
         {
@@ -173,8 +377,6 @@ async def add_api_attributes(request: Request, call_next):
             "journey.step.name": step_name
         }
     )
-    if log_record:
-        otel_logger.emit(log_record)
     
     # Track request count in metrics
     attributes = {
@@ -204,7 +406,7 @@ async def add_api_attributes(request: Request, call_next):
             )
             
             # Log the error
-            log_record = create_log_record(
+            create_log_record(
                 f"Request failed with status {response.status_code}",
                 "ERROR",
                 {
@@ -218,11 +420,9 @@ async def add_api_attributes(request: Request, call_next):
                     "duration": duration
                 }
             )
-            if log_record:
-                otel_logger.emit(log_record)
         else:
             # Log the successful response
-            log_record = create_log_record(
+            create_log_record(
                 f"Completed {request.method} {request.url.path} with status {response.status_code}",
                 "INFO",
                 {
@@ -236,8 +436,6 @@ async def add_api_attributes(request: Request, call_next):
                     "duration": duration
                 }
             )
-            if log_record:
-                otel_logger.emit(log_record)
         
         # Add request ID to response headers
         response.headers["X-Request-ID"] = request_id
@@ -252,7 +450,7 @@ async def add_api_attributes(request: Request, call_next):
         )
         
         # Log the exception
-        log_record = create_log_record(
+        create_log_record(
             f"Request failed with exception: {str(e)}",
             "ERROR",
             {
@@ -267,8 +465,6 @@ async def add_api_attributes(request: Request, call_next):
                 "duration": duration
             }
         )
-        if log_record:
-            otel_logger.emit(log_record)
         
         # Re-raise the exception
         raise
@@ -293,7 +489,7 @@ def simulate_processing(span_name):
         span.set_attribute("latency_seconds", latency)
         
         # Log the operation start
-        log_record = create_log_record(
+        create_log_record(
             f"Processing {span_name} operation with target latency {latency:.2f}s",
             "INFO",
             {
@@ -303,8 +499,6 @@ def simulate_processing(span_name):
                 "api.environment": API_ENVIRONMENT
             }
         )
-        if log_record:
-            otel_logger.emit(log_record)
         
         # Environment-specific issues
         env_error = False
@@ -366,7 +560,7 @@ def simulate_processing(span_name):
             })
             
             # Log the error
-            log_record = create_log_record(
+            create_log_record(
                 f"Operation {span_name} failed: {error_message}",
                 "ERROR",
                 {
@@ -378,11 +572,9 @@ def simulate_processing(span_name):
                     "api.environment": API_ENVIRONMENT
                 }
             )
-            if log_record:
-                otel_logger.emit(log_record)
         else:
             # Log the success
-            log_record = create_log_record(
+            create_log_record(
                 f"Operation {span_name} completed successfully in {latency:.2f}s",
                 "INFO",
                 {
@@ -392,8 +584,6 @@ def simulate_processing(span_name):
                     "api.environment": API_ENVIRONMENT
                 }
             )
-            if log_record:
-                otel_logger.emit(log_record)
             
         return not env_error  # Return success/failure
 
@@ -473,5 +663,6 @@ if __name__ == "__main__":
     finally:
         # Shutdown the providers
         tracer_provider.shutdown()
-        logger_provider.shutdown()
-        meter_provider.shutdown() 
+        meter_provider.shutdown()
+        # Close Elasticsearch connection
+        es_logger.close()
