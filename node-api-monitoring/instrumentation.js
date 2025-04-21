@@ -7,11 +7,21 @@ const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http')
 const { OTLPMetricExporter } = require('@opentelemetry/exporter-metrics-otlp-http');
 const { OTLPLogExporter } = require('@opentelemetry/exporter-logs-otlp-proto');
 const { PeriodicExportingMetricReader } = require('@opentelemetry/sdk-metrics');
+const { MeterProvider } = require('@opentelemetry/sdk-metrics');
 const { LoggerProvider, SimpleLogRecordProcessor } = require('@opentelemetry/sdk-logs');
 const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumentations-node');
+const { metrics, diag, DiagConsoleLogger, DiagLogLevel } = require('@opentelemetry/api');
 const winston = require('winston');
 
+// Enable diagnostic logging
+diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.INFO);
 
+// Create resource
+const resource = resourceFromAttributes({
+  [ATTR_SERVICE_NAME]: 'api-monitoring-service',
+  [ATTR_SERVICE_VERSION]: '1.0.0',
+  [ATTR_DEPLOYMENT_ENVIRONMENT]: 'development'
+});
 
 // Configure OTLP exporters to send to OpenTelemetry Collector
 const traceExporter = new OTLPTraceExporter({
@@ -29,13 +39,38 @@ const logExporter = new OTLPLogExporter({
   headers: {}
 });
 
+// Initialize MeterProvider
+const meterProvider = new MeterProvider({
+  resource: resource,
+});
+
+// Add metric reader
+meterProvider.addMetricReader(
+  new PeriodicExportingMetricReader({
+    exporter: metricExporter,
+    exportIntervalMillis: 1000,
+  })
+);
+
+// Set the global meter provider
+metrics.setGlobalMeterProvider(meterProvider);
+
+// Create a meter
+const meter = metrics.getMeter('example-meter');
+
+// Create some metrics
+const requestCounter = meter.createCounter('http_requests_total', {
+  description: 'Total number of HTTP requests',
+});
+
+const requestDurationHistogram = meter.createHistogram('http_request_duration_seconds', {
+  description: 'HTTP request duration in seconds',
+  unit: 's',
+});
+
 // Initialize LoggerProvider
 const loggerProvider = new LoggerProvider({
-  resource: resourceFromAttributes({
-    [ATTR_SERVICE_NAME]: 'api-monitoring-service',
-    [ATTR_SERVICE_VERSION]: '1.0.0',
-    [ATTR_DEPLOYMENT_ENVIRONMENT]: 'development'
-  }),
+  resource: resource,
 });
 loggerProvider.addLogRecordProcessor(new SimpleLogRecordProcessor(logExporter));
 
@@ -80,11 +115,7 @@ const originalLoggerMethods = {
 
 // Initialize and start the OpenTelemetry SDK
 const sdk = new NodeSDK({
-  resource: resourceFromAttributes({
-    [ATTR_SERVICE_NAME]: 'api-monitoring-service',
-    [ATTR_SERVICE_VERSION]: '1.0.0',
-    [ATTR_DEPLOYMENT_ENVIRONMENT]: 'development'
-  }),
+  resource: resource,
   traceExporter,
   metricReader: new PeriodicExportingMetricReader({
     exporter: metricExporter,
@@ -96,7 +127,11 @@ const sdk = new NodeSDK({
 // Export the logger for use in the application
 module.exports = {
   logger,
-  sdk
+  sdk,
+  metrics: {
+    requestCounter,
+    requestDurationHistogram
+  }
 };
 
 sdk.start();
