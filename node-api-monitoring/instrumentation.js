@@ -1,21 +1,102 @@
 /*instrumentation.js*/
 // Require dependencies
 const { NodeSDK } = require('@opentelemetry/sdk-node');
-const { ConsoleSpanExporter } = require('@opentelemetry/sdk-trace-node');
-const {
-  getNodeAutoInstrumentations,
-} = require('@opentelemetry/auto-instrumentations-node');
-const {
-  PeriodicExportingMetricReader,
-  ConsoleMetricExporter,
-} = require('@opentelemetry/sdk-metrics');
+const { resourceFromAttributes } = require('@opentelemetry/resources');
+const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION, ATTR_DEPLOYMENT_ENVIRONMENT } = require('@opentelemetry/semantic-conventions');
+const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
+const { OTLPMetricExporter } = require('@opentelemetry/exporter-metrics-otlp-http');
+const { OTLPLogExporter } = require('@opentelemetry/exporter-logs-otlp-proto');
+const { PeriodicExportingMetricReader } = require('@opentelemetry/sdk-metrics');
+const { LoggerProvider, SimpleLogRecordProcessor } = require('@opentelemetry/sdk-logs');
+const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumentations-node');
+const winston = require('winston');
 
-const sdk = new NodeSDK({
-  traceExporter: new ConsoleSpanExporter(),
-  metricReader: new PeriodicExportingMetricReader({
-    exporter: new ConsoleMetricExporter(),
-  }),
-  instrumentations: [getNodeAutoInstrumentations()],
+
+
+// Configure OTLP exporters to send to OpenTelemetry Collector
+const traceExporter = new OTLPTraceExporter({
+  url: 'http://localhost:4318/v1/traces',
+  headers: {}
 });
+
+const metricExporter = new OTLPMetricExporter({
+  url: 'http://localhost:4318/v1/metrics',
+  headers: {}
+});
+
+const logExporter = new OTLPLogExporter({
+  url: 'http://localhost:4318/v1/logs',
+  headers: {}
+});
+
+// Initialize LoggerProvider
+const loggerProvider = new LoggerProvider({
+  resource: resourceFromAttributes({
+    [ATTR_SERVICE_NAME]: 'api-monitoring-service',
+    [ATTR_SERVICE_VERSION]: '1.0.0',
+    [ATTR_DEPLOYMENT_ENVIRONMENT]: 'development'
+  }),
+});
+loggerProvider.addLogRecordProcessor(new SimpleLogRecordProcessor(logExporter));
+
+// Configure Winston logger with custom OpenTelemetry transport
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  defaultMeta: { service: 'api-monitoring-service' },
+  transports: [
+    new winston.transports.Console(),
+    // Log to console for debugging purposes
+  ]
+});
+
+// Create a custom Winston logger that also logs to OpenTelemetry
+// Wrap the Winston logger methods to send logs to OTel
+const originalLoggerMethods = {
+  info: logger.info,
+  warn: logger.warn,
+  error: logger.error,
+  debug: logger.debug,
+};
+
+// Wrap Winston logger methods to also send logs to OpenTelemetry
+['info', 'warn', 'error', 'debug'].forEach(level => {
+  logger[level] = function(message, meta) {
+    // Call the original Winston method
+    originalLoggerMethods[level].call(logger, message, meta);
+    
+    // Also log to OpenTelemetry
+    const otelLogger = loggerProvider.getLogger('winston-logger');
+    otelLogger.emit({
+      severityText: level,
+      body: message,
+      attributes: meta || {}
+    });
+  };
+});
+
+// Initialize and start the OpenTelemetry SDK
+const sdk = new NodeSDK({
+  resource: resourceFromAttributes({
+    [ATTR_SERVICE_NAME]: 'api-monitoring-service',
+    [ATTR_SERVICE_VERSION]: '1.0.0',
+    [ATTR_DEPLOYMENT_ENVIRONMENT]: 'development'
+  }),
+  traceExporter,
+  metricReader: new PeriodicExportingMetricReader({
+    exporter: metricExporter,
+    exportIntervalMillis: 1000,
+  }),
+  instrumentations: [getNodeAutoInstrumentations()]
+});
+
+// Export the logger for use in the application
+module.exports = {
+  logger,
+  sdk
+};
 
 sdk.start();
