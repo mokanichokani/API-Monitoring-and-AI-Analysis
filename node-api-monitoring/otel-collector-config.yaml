@@ -13,15 +13,8 @@ processors:
 
 exporters:
   elasticsearch:
-    endpoints: ["https://elasticsearch:9200"]
-    username: ${env:ELASTICSEARCH_USERNAME}
-    password: ${env:ELASTICSEARCH_PASSWORD}
-    index: "api-monitoring-%{service.name}-%{telemetry.sdk.language}-%{Y.MM.dd}"
-    mapping:
-      enabled: true
-    logs_index: "api-monitoring-logs-%{service.name}-%{Y.MM.dd}"
-    metrics_index: "api-monitoring-metrics-%{service.name}-%{Y.MM.dd}"
-    traces_index: "api-monitoring-traces-%{service.name}-%{Y.MM.dd}"
+    endpoints: ["http://elasticsearch:9200"]
+    index: "api-monitoring"
     tls:
       insecure: true  # For development only, set to false in production
   
@@ -38,7 +31,7 @@ service:
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [elasticsearch, logging]
+      exporters: [logging]
     logs:
       receivers: [otlp]
       processors: [batch]
