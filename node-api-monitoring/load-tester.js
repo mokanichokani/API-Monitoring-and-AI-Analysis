@@ -2,7 +2,7 @@
 const axios = require('axios');
 
 // Configuration
-const API_BASE_URL = 'http://localhost:8080';
+const API_BASE_URL = process.env.API_URL || 'http://app:8080'; // Use the service name in Docker
 const REQUEST_INTERVAL_MS = 500; // Send a request every 500ms
 const TOTAL_DURATION_MS = 60000; // Run for 60 seconds
 const endpoints = [
@@ -62,7 +62,7 @@ console.log('Starting load test...');
 const intervalId = setInterval(makeRequest, REQUEST_INTERVAL_MS);
 
 // Set up periodic stats printing
-const statsIntervalId = setInterval(printStats, 1000);
+const statsIntervalId = setInterval(printStats, 5000);
 
 // Set a timeout to stop the test after the specified duration
 setTimeout(() => {
@@ -73,4 +73,4 @@ setTimeout(() => {
 }, TOTAL_DURATION_MS);
 
 // Make the first request immediately
-makeRequest();
+makeRequest(); 

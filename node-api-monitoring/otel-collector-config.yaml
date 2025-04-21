@@ -10,15 +10,25 @@ processors:
   batch:
     timeout: 1s
     send_batch_size: 1024
+  
+  # Add metric name/description as fields
+  metricstransform:
+    transforms:
+      - include: .*
+        match_type: regexp
+        action: update
+        operations:
+          - action: add_label
+            new_label: metric_name
+            new_value: $1
 
 exporters:
+  # Elasticsearch exporter for logs and traces
   elasticsearch:
     endpoints: ["http://elasticsearch:9200"]
     index: "api-monitoring"
-    tls:
-      insecure: true  # For development only, set to false in production
   
-  # Adding logging exporter for debugging
+  # Debug exporter
   logging:
     verbosity: detailed
 
@@ -31,7 +41,7 @@ service:
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging]
+      exporters: [logging] # Only use logging for metrics since Elasticsearch doesn't support them
     logs:
       receivers: [otlp]
       processors: [batch]

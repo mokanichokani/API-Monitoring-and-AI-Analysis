@@ -37,9 +37,6 @@ services:
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
-    environment:
-      - ELASTICSEARCH_USERNAME=
-      - ELASTICSEARCH_PASSWORD=
     ports:
       - "4317:4317"   # OTLP gRPC receiver
       - "4318:4318"   # OTLP HTTP receiver
@@ -52,6 +49,38 @@ services:
       - elasticsearch
     networks:
       - elastic
+      
+  # Node.js application
+  app:
+    image: node:20
+    container_name: node-app
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: bash -c "npm install && node index.js"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - otel-collector
+    networks:
+      - elastic
+      
+  # Load-tester service
+  load-tester:
+    image: node:20
+    container_name: load-tester
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: bash -c "npm install && node load-tester.js"
+    depends_on:
+      - app
+    networks:
+      - elastic
+    # Start this manually when needed:
+    # docker-compose up load-tester
+    profiles:
+      - tools
 
 volumes:
   elasticsearch-data:
