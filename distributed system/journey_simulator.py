@@ -31,14 +31,15 @@ OTEL_COLLECTOR_ENDPOINT = os.getenv("OTEL_COLLECTOR_ENDPOINT", "http://localhost
 
 # Configure OpenTelemetry resource
 resource = Resource(attributes={
-    SERVICE_NAME: "journey-simulator"
+    SERVICE_NAME: "journey-simulator",
+    "monitoring.system": "otel-api-monitoring"
 })
 
 # Set up trace provider
 tracer_provider = TracerProvider(resource=resource)
 trace.set_tracer_provider(tracer_provider)
 
-# Configure exporter
+# Configure trace exporter
 otlp_exporter = OTLPSpanExporter(endpoint=OTEL_COLLECTOR_ENDPOINT)
 tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
 
@@ -92,7 +93,7 @@ def select_journey():
             return journey
     return journeys[0]  # Fallback to first journey
 
-async def call_api(session, step, journey_id, request_id):
+async def call_api(session, step, journey_id, request_id, journey_name):
     """Make an API call with proper span context propagation"""
     method = step["method"]
     url = step["url"]
@@ -146,7 +147,7 @@ async def execute_journey(journey):
                     
                     logger.info(f"Executing step {i+1}/{total_steps}: {step_name} for journey {journey_name}")
                     
-                    status, response = await call_api(session, step, journey_id, request_id)
+                    status, response = await call_api(session, step, journey_id, request_id, journey_name)
                     
                     step_span.set_attribute("http.status_code", status)
                     

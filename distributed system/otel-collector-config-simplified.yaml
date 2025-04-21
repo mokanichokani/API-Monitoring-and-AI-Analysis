@@ -19,6 +19,7 @@ processors:
 exporters:
   elasticsearch:
     endpoints: [http://elasticsearch:9200]
+    traces_index: traces-otel
   
   logging:
     loglevel: debug
@@ -29,11 +30,6 @@ exporters:
 service:
   pipelines:
     traces:
-      receivers: [otlp]
-      processors: [batch, resource]
-      exporters: [elasticsearch, logging]
-      
-    logs:
       receivers: [otlp]
       processors: [batch, resource]
       exporters: [elasticsearch, logging]

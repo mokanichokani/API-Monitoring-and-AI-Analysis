@@ -309,50 +309,172 @@ def visualize_anomalies(df, output_dir='./'):
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    # Plot latency anomalies
-    if 'latency' in df.columns and 'latency_anomaly' in df.columns:
-        plt.figure(figsize=(12, 6))
-        plt.scatter(df['timestamp'], df['latency'], 
-                   c=df['latency_anomaly'], cmap='coolwarm', alpha=0.7)
-        plt.xlabel('Time')
-        plt.ylabel('Latency (seconds)')
-        plt.title('API Call Latency Anomalies')
-        plt.colorbar(label='Anomaly')
-        plt.tight_layout()
-        plt.savefig(f"{output_dir}/latency_anomalies_{timestamp}.png")
-        plt.close()
-        print(f"Saved latency anomaly visualization to {output_dir}/latency_anomalies_{timestamp}.png")
+    # Make sure timestamp is datetime type
+    if isinstance(df['timestamp'].iloc[0], str):
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
     
-    # Plot error rate anomalies
+    # Add hourly markers for better time granularity
+    df['hour'] = df['timestamp'].dt.floor('h')
+    
+    # Plot latency anomalies with enhanced visualization
+    if 'latency' in df.columns and 'latency_anomaly' in df.columns:
+        plt.figure(figsize=(14, 8))
+        
+        # Plot normal points in blue
+        normal_points = df[df['latency_anomaly'] == 0]
+        plt.scatter(normal_points['timestamp'], normal_points['latency'], 
+                   color='blue', alpha=0.6, label='Normal', s=30)
+        
+        # Plot anomaly points in red and larger
+        anomaly_points = df[df['latency_anomaly'] == 1]
+        plt.scatter(anomaly_points['timestamp'], anomaly_points['latency'], 
+                   color='red', alpha=0.8, label='Anomaly', s=80)
+        
+        # Plot hourly average latency as a line
+        hourly_avg = df.groupby('hour')['latency'].mean().reset_index()
+        plt.plot(hourly_avg['hour'], hourly_avg['latency'], 'g-', label='Hourly Average', linewidth=2)
+        
+        # Format the plot
+        plt.xlabel('Time', fontsize=12)
+        plt.ylabel('Latency (seconds)', fontsize=12)
+        plt.title('API Call Latency Anomalies by Hour', fontsize=14, fontweight='bold')
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend(fontsize=10)
+        
+        # Format x-axis to show hours clearly
+        plt.gcf().autofmt_xdate()
+        plt.tight_layout()
+        
+        # Save the visualization
+        latency_file = f"{output_dir}/latency_anomalies_{timestamp}.png"
+        plt.savefig(latency_file, dpi=300)
+        plt.close()
+        print(f"Saved enhanced latency anomaly visualization to {latency_file}")
+    
+    # Plot error rate anomalies with enhanced visualization
     if 'window_error_rate' in df.columns and 'error_rate_anomaly' in df.columns:
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=(14, 8))
         
         # Get unique timestamps for the error rate windows
         window_data = df.drop_duplicates(subset=['timestamp', 'window_error_rate', 'error_rate_anomaly'])
+        window_data['hour'] = window_data['timestamp'].dt.floor('h')
         
-        plt.scatter(window_data['timestamp'], window_data['window_error_rate'], 
-                   c=window_data['error_rate_anomaly'], cmap='coolwarm', alpha=0.7, s=50)
-        plt.xlabel('Time')
-        plt.ylabel('Error Rate')
-        plt.title('API Call Error Rate Anomalies')
-        plt.colorbar(label='Anomaly')
+        # Group by hour for error rates
+        hourly_errors = window_data.groupby('hour').agg({
+            'window_error_rate': 'mean',
+            'error_rate_anomaly': 'max'  # If any window in the hour had an anomaly
+        }).reset_index()
+        
+        # Create a bar chart for hourly error rates
+        bars = plt.bar(hourly_errors['hour'], hourly_errors['window_error_rate'], 
+                      width=0.03, alpha=0.7, color=hourly_errors['error_rate_anomaly'].map({0: 'blue', 1: 'red'}))
+        
+        # Add a threshold line
+        threshold = df['error_rate_anomaly'].sum() / len(df) if len(df) > 0 else 0.2
+        plt.axhline(y=threshold, color='green', linestyle='--', label=f'Threshold ({threshold:.2f})')
+        
+        # Format the plot
+        plt.xlabel('Time', fontsize=12)
+        plt.ylabel('Error Rate', fontsize=12)
+        plt.title('Hourly API Error Rates with Anomalies', fontsize=14, fontweight='bold')
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend(['Error Rate', f'Threshold ({threshold:.2f})'])
+        
+        # Add annotations for anomalies
+        for i, row in hourly_errors[hourly_errors['error_rate_anomaly'] == 1].iterrows():
+            plt.annotate(f"{row['window_error_rate']:.2f}", 
+                        (row['hour'], row['window_error_rate']),
+                        textcoords="offset points", 
+                        xytext=(0,10), 
+                        ha='center',
+                        fontweight='bold',
+                        arrowprops=dict(arrowstyle='->'))
+        
+        # Format x-axis to show hours clearly
+        plt.gcf().autofmt_xdate()
         plt.tight_layout()
-        plt.savefig(f"{output_dir}/error_rate_anomalies_{timestamp}.png")
+        
+        # Save the visualization
+        error_file = f"{output_dir}/error_rate_anomalies_{timestamp}.png"
+        plt.savefig(error_file, dpi=300)
         plt.close()
-        print(f"Saved error rate anomaly visualization to {output_dir}/error_rate_anomalies_{timestamp}.png")
+        print(f"Saved enhanced error rate anomaly visualization to {error_file}")
+    
+    # Generate additional visualizations for better insights
+    
+    # 1. Latency Distribution Histogram
+    if 'latency' in df.columns:
+        plt.figure(figsize=(12, 6))
+        
+        # Create bins for histogram
+        bins = np.linspace(df['latency'].min(), df['latency'].max(), 30)
+        
+        # Plot histogram with KDE
+        plt.hist(df['latency'], bins=bins, alpha=0.6, color='blue', density=True, label='Latency Distribution')
+        
+        # Add vertical lines for mean and median
+        plt.axvline(df['latency'].mean(), color='red', linestyle='dashed', linewidth=2, label=f'Mean: {df["latency"].mean():.3f}s')
+        plt.axvline(df['latency'].median(), color='green', linestyle='dashed', linewidth=2, label=f'Median: {df["latency"].median():.3f}s')
+        
+        # If we have anomalies, mark their distribution
+        if 'latency_anomaly' in df.columns and df['latency_anomaly'].sum() > 0:
+            anomaly_latencies = df[df['latency_anomaly'] == 1]['latency']
+            plt.hist(anomaly_latencies, bins=bins, alpha=0.6, color='red', density=True, label='Anomaly Distribution')
+        
+        plt.xlabel('Latency (seconds)', fontsize=12)
+        plt.ylabel('Density', fontsize=12)
+        plt.title('Latency Distribution with Anomalies', fontsize=14, fontweight='bold')
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend()
+        plt.tight_layout()
+        
+        # Save the visualization
+        dist_file = f"{output_dir}/latency_distribution_{timestamp}.png"
+        plt.savefig(dist_file, dpi=300)
+        plt.close()
+        print(f"Saved latency distribution visualization to {dist_file}")
+    
+    # 2. Service-specific latency comparison
+    if 'latency' in df.columns and 'service' in df.columns and len(df['service'].unique()) > 1:
+        plt.figure(figsize=(14, 8))
+        
+        # Group by service and hour
+        service_data = df.groupby(['service', 'hour'])['latency'].mean().reset_index()
+        
+        # Plot line for each service
+        for service in df['service'].unique():
+            service_slice = service_data[service_data['service'] == service]
+            plt.plot(service_slice['hour'], service_slice['latency'], 'o-', linewidth=2, label=service)
+        
+        plt.xlabel('Time', fontsize=12)
+        plt.ylabel('Average Latency (seconds)', fontsize=12)
+        plt.title('Service Latency Comparison by Hour', fontsize=14, fontweight='bold')
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend()
+        plt.gcf().autofmt_xdate()
+        plt.tight_layout()
+        
+        # Save the visualization
+        service_file = f"{output_dir}/service_latency_comparison_{timestamp}.png"
+        plt.savefig(service_file, dpi=300)
+        plt.close()
+        print(f"Saved service latency comparison to {service_file}")
     
     # Print detailed anomaly information
     if 'latency_anomaly' in df.columns:
         latency_anomalies = df[df['latency_anomaly'] == 1]
         if len(latency_anomalies) > 0:
             print("\nLatency Anomalies:")
-            print(latency_anomalies[['timestamp', 'latency', 'trace_id', 'span_id', 'parent_span_id', 'error', 'error_type']].head(10))
+            anomaly_df = latency_anomalies[['timestamp', 'latency', 'trace_id', 'span_id', 'service', 'error', 'error_type']].head(10)
+            print(anomaly_df.to_string(index=False))
     
     if 'error_rate_anomaly' in df.columns:
         error_anomalies = df[df['error_rate_anomaly'] == 1]
         if len(error_anomalies) > 0:
             print("\nError Rate Anomalies:")
-            print(error_anomalies[['timestamp', 'window_error_rate']].drop_duplicates().head(10))
+            window_data = error_anomalies[['timestamp', 'window_error_rate']].drop_duplicates().head(10)
+            window_data['hour'] = window_data['timestamp'].dt.strftime('%Y-%m-%d %H:00')
+            print(window_data[['hour', 'window_error_rate']].to_string(index=False))
 
 def main():
     parser = argparse.ArgumentParser(description='Detect anomalies in OpenTelemetry trace data from Elasticsearch')
@@ -363,7 +485,7 @@ def main():
     
     parser.add_argument('--host', default=default_host, help='Elasticsearch host')
     parser.add_argument('--port', default=default_port, type=int, help='Elasticsearch port')
-    parser.add_argument('--index', default='traces-generic-default', help='Elasticsearch index name')
+    parser.add_argument('--index', default='traces-otel', help='Elasticsearch index name')
     parser.add_argument('--hours', default=24, type=int, help='Time range in hours to analyze')
     parser.add_argument('--contamination', default=0.05, type=float, help='Isolation Forest contamination parameter')
     parser.add_argument('--error-threshold', default=0.2, type=float, help='Error rate threshold for anomaly detection')
