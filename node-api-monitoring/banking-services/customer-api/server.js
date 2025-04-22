@@ -47,7 +47,7 @@ app.use((req, res, next) => {
   // Track active sessions (increment)
   if (!activeSessions.has(sessionId)) {
     activeSessions.set(sessionId, Date.now());
-    metrics.metrics.activeUsersGauge.add(1, {
+    metrics.activeUsersGauge.add(1, {
       service: 'customer-api'
     });
   }
@@ -55,7 +55,7 @@ app.use((req, res, next) => {
   // Add trace context to response headers
   res.on('finish', () => {
     const duration = (Date.now() - startTime) / 1000; // seconds
-    metrics.metrics.requestDurationHistogram.record(duration, {
+    metrics.requestDurationHistogram.record(duration, {
       service: 'customer-api',
       method: req.method,
       path: req.path,
@@ -100,7 +100,7 @@ app.get('/api/customers', (req, res) => {
     res.json(sanitizedCustomers);
   } catch (error) {
     logger.error('Failed to get customers', { error: error.message, stack: error.stack, requestId: req.requestId });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-api', operation: 'getCustomers' });
+    metrics.errorCounter.add(1, { service: 'customer-api', operation: 'getCustomers' });
     res.status(500).json({ error: 'Failed to get customers' });
   }
 });
@@ -130,7 +130,7 @@ app.get('/api/customers/:id', (req, res) => {
       customerId: req.params.id, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-api', operation: 'getCustomer' });
+    metrics.errorCounter.add(1, { service: 'customer-api', operation: 'getCustomer' });
     res.status(500).json({ error: 'Failed to get customer' });
   }
 });
@@ -151,7 +151,7 @@ app.get('/api/accounts/:accountNumber/balance', (req, res) => {
       accountNumber: req.params.accountNumber, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-api', operation: 'getBalance' });
+    metrics.errorCounter.add(1, { service: 'customer-api', operation: 'getBalance' });
     res.status(500).json({ error: 'Failed to get balance' });
   }
 });
@@ -172,8 +172,9 @@ app.post('/api/accounts/:accountNumber/deposit', async (req, res) => {
   
   try {
     // Call transaction service
-    const response = await axios.post('http://transaction-service:3001/api/transactions/deposit', {
-      accountNumber,
+    const response = await axios.post('http://transaction-service:3004/api/transactions', {
+      type: 'deposit',
+      targetAccountNumber: accountNumber,
       amount
     }, {
       headers: {
@@ -198,7 +199,7 @@ app.post('/api/accounts/:accountNumber/deposit', async (req, res) => {
       amount, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-api', operation: 'deposit' });
+    metrics.errorCounter.add(1, { service: 'customer-api', operation: 'deposit' });
     
     if (error.response) {
       return res.status(error.response.status).json(error.response.data);
@@ -224,8 +225,9 @@ app.post('/api/accounts/:accountNumber/withdrawal', async (req, res) => {
   
   try {
     // Call transaction service
-    const response = await axios.post('http://transaction-service:3001/api/transactions/withdrawal', {
-      accountNumber,
+    const response = await axios.post('http://transaction-service:3004/api/transactions', {
+      type: 'withdrawal',
+      sourceAccountNumber: accountNumber,
       amount
     }, {
       headers: {
@@ -250,7 +252,7 @@ app.post('/api/accounts/:accountNumber/withdrawal', async (req, res) => {
       amount, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-api', operation: 'withdrawal' });
+    metrics.errorCounter.add(1, { service: 'customer-api', operation: 'withdrawal' });
     
     if (error.response) {
       return res.status(error.response.status).json(error.response.data);
@@ -285,9 +287,10 @@ app.post('/api/accounts/:accountNumber/transfer', async (req, res) => {
   
   try {
     // Call transaction service
-    const response = await axios.post('http://transaction-service:3001/api/transactions/transfer', {
-      sourceAccount: accountNumber,
-      destinationAccount,
+    const response = await axios.post('http://transaction-service:3004/api/transactions', {
+      type: 'transfer',
+      sourceAccountNumber: accountNumber,
+      targetAccountNumber: destinationAccount,
       amount
     }, {
       headers: {
@@ -314,7 +317,7 @@ app.post('/api/accounts/:accountNumber/transfer', async (req, res) => {
       amount, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-api', operation: 'transfer' });
+    metrics.errorCounter.add(1, { service: 'customer-api', operation: 'transfer' });
     
     if (error.response) {
       return res.status(error.response.status).json(error.response.data);
@@ -324,13 +327,13 @@ app.post('/api/accounts/:accountNumber/transfer', async (req, res) => {
   }
 });
 
-// Get transaction history (forward to analytics service)
+// Get transaction history (forward to transaction service)
 app.get('/api/accounts/:accountNumber/transactions', async (req, res) => {
   const { accountNumber } = req.params;
   
   try {
-    // Call analytics service
-    const response = await axios.get(`http://analytics-service:3002/api/analytics/transactions/${accountNumber}`, {
+    // Call transaction service
+    const response = await axios.get(`http://transaction-service:3004/api/accounts/${accountNumber}/transactions`, {
       headers: {
         'X-Session-ID': req.sessionId,
         'X-Request-ID': req.requestId
@@ -339,7 +342,7 @@ app.get('/api/accounts/:accountNumber/transactions', async (req, res) => {
     
     logger.info('Transaction history retrieved', { 
       accountNumber,
-      count: response.data.length,
+      count: response.data.transactions?.length || 0,
       requestId: req.requestId 
     });
     
@@ -351,13 +354,49 @@ app.get('/api/accounts/:accountNumber/transactions', async (req, res) => {
       accountNumber, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-api', operation: 'getTransactionHistory' });
+    metrics.errorCounter.add(1, { service: 'customer-api', operation: 'getTransactionHistory' });
     
     if (error.response) {
       return res.status(error.response.status).json(error.response.data);
     }
     
     res.status(500).json({ error: 'Failed to retrieve transaction history' });
+  }
+});
+
+// Get customer profile with accounts (forwards to customer service)
+app.get('/api/customers/:id/profile', async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    // Call customer service
+    const response = await axios.get(`http://customer-service:3003/api/customers/${id}/profile`, {
+      headers: {
+        'X-Session-ID': req.sessionId,
+        'X-Request-ID': req.requestId
+      }
+    });
+    
+    logger.info('Customer profile retrieved', { 
+      customerId: id,
+      requestId: req.requestId 
+    });
+    
+    res.status(200).json(response.data);
+  } catch (error) {
+    logger.error('Failed to retrieve customer profile', { 
+      error: error.message, 
+      stack: error.stack, 
+      customerId: id, 
+      requestId: req.requestId 
+    });
+    metrics.errorCounter.add(1, { service: 'customer-api', operation: 'getCustomerProfile' });
+    
+    if (error.response) {
+      return res.status(error.response.status).json(error.response.data);
+    }
+    
+    res.status(500).json({ error: 'Failed to retrieve customer profile' });
   }
 });
 

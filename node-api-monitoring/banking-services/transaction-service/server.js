@@ -47,7 +47,7 @@ app.use((req, res, next) => {
   // Add trace context to response headers
   res.on('finish', () => {
     const duration = (Date.now() - startTime) / 1000; // seconds
-    metrics.metrics.requestDurationHistogram.record(duration, {
+    metrics.requestDurationHistogram.record(duration, {
       service: 'transaction-service',
       method: req.method,
       path: req.path,
@@ -251,21 +251,21 @@ app.post('/api/transactions', async (req, res) => {
     // Record metrics
     const processingTime = Date.now() - processingStartTime;
     
-    metrics.metrics.transactionProcessingTime.record(processingTime / 1000, {
+    metrics.transactionProcessingTime.record(processingTime / 1000, {
       service: 'transaction-service',
       type,
       status: 'success',
       environment: 'on-premises'
     });
     
-    metrics.metrics.transactionCounter.add(1, {
+    metrics.transactionCounter.add(1, {
       service: 'transaction-service',
       type,
       status: 'success',
       environment: 'on-premises'
     });
     
-    metrics.metrics.transactionAmountSum.record(amount, {
+    metrics.transactionAmountSum.record(amount, {
       service: 'transaction-service',
       type,
       environment: 'on-premises'
@@ -297,7 +297,7 @@ app.post('/api/transactions', async (req, res) => {
       requestId: req.requestId 
     });
     
-    metrics.metrics.errorCounter.add(1, { 
+    metrics.errorCounter.add(1, { 
       service: 'transaction-service', 
       operation: 'processTransaction',
       type,
@@ -333,7 +333,7 @@ app.get('/api/transactions/:id', (req, res) => {
       transactionId: id, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'transaction-service', operation: 'getTransaction' });
+    metrics.errorCounter.add(1, { service: 'transaction-service', operation: 'getTransaction' });
     res.status(500).json({ error: 'Failed to get transaction' });
   }
 });
@@ -402,7 +402,7 @@ app.get('/api/accounts/:accountNumber/transactions', (req, res) => {
       accountNumber, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'transaction-service', operation: 'getAccountTransactions' });
+    metrics.errorCounter.add(1, { service: 'transaction-service', operation: 'getAccountTransactions' });
     res.status(500).json({ error: 'Failed to get account transactions' });
   }
 });
@@ -429,7 +429,7 @@ app.get('/api/customers/:customerId/transactions', async (req, res) => {
       const latency = Date.now() - startTime;
       
       // Record the service call metrics
-      metrics.metrics.serviceCallDurationHistogram.record(latency / 1000, {
+      metrics.serviceCallDurationHistogram.record(latency / 1000, {
         service: 'transaction-service',
         target_service: 'account-service',
         operation: 'getCustomerAccounts',
@@ -501,7 +501,7 @@ app.get('/api/customers/:customerId/transactions', async (req, res) => {
       });
     } catch (axiosError) {
       // Record the failed service call
-      metrics.metrics.serviceCallErrorCounter.add(1, {
+      metrics.serviceCallErrorCounter.add(1, {
         service: 'transaction-service',
         target_service: 'account-service',
         operation: 'getCustomerAccounts',
@@ -524,7 +524,7 @@ app.get('/api/customers/:customerId/transactions', async (req, res) => {
       customerId, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'transaction-service', operation: 'getCustomerTransactions' });
+    metrics.errorCounter.add(1, { service: 'transaction-service', operation: 'getCustomerTransactions' });
     res.status(500).json({ error: 'Failed to get customer transactions' });
   }
 });
@@ -556,7 +556,7 @@ app.get('/api/transactions/statistics', (req, res) => {
       period: req.query.period, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'transaction-service', operation: 'getTransactionStatistics' });
+    metrics.errorCounter.add(1, { service: 'transaction-service', operation: 'getTransactionStatistics' });
     res.status(500).json({ error: 'Failed to get transaction statistics' });
   }
 });
@@ -587,7 +587,7 @@ app.get('/api/transactions/:id/verify', (req, res) => {
       transactionId: id, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'transaction-service', operation: 'verifyTransaction' });
+    metrics.errorCounter.add(1, { service: 'transaction-service', operation: 'verifyTransaction' });
     res.status(500).json({ error: 'Failed to verify transaction' });
   }
 });

@@ -7,7 +7,7 @@ const { registerInstrumentations } = require('@opentelemetry/instrumentation');
 const { HttpInstrumentation } = require('@opentelemetry/instrumentation-http');
 const { ExpressInstrumentation } = require('@opentelemetry/instrumentation-express');
 const { resourceFromAttributes } = require('@opentelemetry/resources');
-const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
+const { SemanticResourceAttributes, ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION, ATTR_DEPLOYMENT_ENVIRONMENT } = require('@opentelemetry/semantic-conventions');
 const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
 const { OTLPMetricExporter } = require('@opentelemetry/exporter-metrics-otlp-http');
 const { OTLPLogExporter } = require('@opentelemetry/exporter-logs-otlp-proto');
@@ -23,14 +23,19 @@ const { B3InjectEncoding, B3Propagator } = require('@opentelemetry/propagator-b3
 
 // Initialize a tracer and meter provider
 function initTelemetry(serviceName, environment) {
+  // Set default values if not provided
+  serviceName = serviceName || 'bank-api';
+  environment = environment || 'development';
+  
   // Enable OpenTelemetry debug logging in development
   opentelemetry.diag.setLogger(new opentelemetry.DiagConsoleLogger(), opentelemetry.DiagLogLevel.INFO);
 
   // Define resource information
   const resource = resourceFromAttributes({
-    [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
-    [SemanticResourceAttributes.SERVICE_VERSION]: '1.0.0',
-    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: environment,
+    [ATTR_SERVICE_NAME]: serviceName,
+    [ATTR_SERVICE_VERSION]: '1.0.0',
+    [ATTR_DEPLOYMENT_ENVIRONMENT]: environment,
+    'service.name': 'bank-api', // Fix to match exactly what's in the collector config
     'service.instance.id': `${serviceName}-${Math.random().toString(36).substring(2, 12)}`,
     'host.type': environment
   });
@@ -38,17 +43,23 @@ function initTelemetry(serviceName, environment) {
   // Configure OTLP exporters to send to OpenTelemetry Collector
   const traceExporter = new OTLPTraceExporter({
     url: 'http://otel-collector:4318/v1/traces', 
-    headers: {}
+    headers: {
+      'X-Service-Name': serviceName // Add service name to headers
+    }
   });
 
   const metricExporter = new OTLPMetricExporter({
     url: 'http://otel-collector:4318/v1/metrics',
-    headers: {}
+    headers: {
+      'X-Service-Name': serviceName
+    }
   });
 
   const logExporter = new OTLPLogExporter({
     url: 'http://otel-collector:4318/v1/logs',
-    headers: {}
+    headers: {
+      'X-Service-Name': serviceName
+    }
   });
 
   // Initialize MeterProvider
@@ -86,12 +97,15 @@ function initTelemetry(serviceName, environment) {
       environment: environment
     },
     transports: [
+      // Console transport for local visibility
       new winston.transports.Console({
         format: winston.format.combine(
           winston.format.colorize(),
           winston.format.simple()
         )
-      })
+      }),
+      // Note: Logs are collected by the container runtime and visible via 'docker logs'
+      // They appear in Prometheus metrics but are not directly indexed in Elasticsearch
     ]
   });
 
@@ -120,8 +134,18 @@ function initTelemetry(serviceName, environment) {
     traceExporter: traceExporter,
     contextManager: new contextManager.AsyncHooksContextManager(),
     instrumentations: [
-      new HttpInstrumentation(),
-      new ExpressInstrumentation()
+      new HttpInstrumentation({
+        // Add service name as an attribute to every span
+        requestHook: (span) => {
+          span.setAttribute('service.name', 'bank-api');
+        }
+      }),
+      new ExpressInstrumentation({
+        // Add service name as an attribute to every span
+        requestHook: (span) => {
+          span.setAttribute('service.name', 'bank-api');
+        }
+      })
     ],
     // Use both W3C and B3 propagation for maximum compatibility
     textMapPropagator: new CompositePropagator({
@@ -161,6 +185,63 @@ function initTelemetry(serviceName, environment) {
     unit: '1',
   });
 
+  // Account service metrics
+  const accountCounter = meter.createCounter('bank.accounts_total', {
+    description: 'Total number of accounts created',
+    unit: '1',
+  });
+
+  const accountStatusChangeCounter = meter.createCounter('bank.account_status_changes_total', {
+    description: 'Total number of account status changes',
+    unit: '1',
+  });
+
+  const insufficientFundsCounter = meter.createCounter('bank.insufficient_funds_total', {
+    description: 'Total number of insufficient funds errors',
+    unit: '1',
+  });
+
+  const transferProcessingTime = meter.createHistogram('bank.transfer_processing_time_seconds', {
+    description: 'Transfer processing time in seconds',
+    unit: 's',
+  });
+
+  const transferCounter = meter.createCounter('bank.transfers_total', {
+    description: 'Total number of transfers',
+    unit: '1',
+  });
+
+  const transferAmountSum = meter.createHistogram('bank.transfer_amount_dollars', {
+    description: 'Transfer amounts in dollars',
+    unit: 'USD',
+  });
+
+  const serviceCallDurationHistogram = meter.createHistogram('bank.service_call_duration_seconds', {
+    description: 'Service call duration in seconds',
+    unit: 's',
+  });
+
+  const serviceCallErrorCounter = meter.createCounter('bank.service_call_errors_total', {
+    description: 'Total number of service call errors',
+    unit: '1',
+  });
+
+  // Transaction service metrics
+  const transactionProcessingTime = meter.createHistogram('bank.transaction_processing_time_seconds', {
+    description: 'Transaction processing time in seconds',
+    unit: 's',
+  });
+
+  const transactionCounter = meter.createCounter('bank.transactions_total', {
+    description: 'Total number of transactions processed',
+    unit: '1',
+  });
+
+  const transactionAmountSum = meter.createHistogram('bank.transaction_amount_dollars', {
+    description: 'Transaction amounts in dollars',
+    unit: 'USD',
+  });
+
   // Return all initialized components
   return {
     logger,
@@ -170,7 +251,18 @@ function initTelemetry(serviceName, environment) {
       requestDurationHistogram,
       transactionValueCounter,
       activeUsersGauge,
-      errorCounter
+      errorCounter,
+      accountCounter,
+      accountStatusChangeCounter,
+      insufficientFundsCounter,
+      transferProcessingTime,
+      transferCounter,
+      transferAmountSum,
+      serviceCallDurationHistogram,
+      serviceCallErrorCounter,
+      transactionProcessingTime,
+      transactionCounter,
+      transactionAmountSum
     },
     sdk
   };
