@@ -23,20 +23,20 @@ processors:
             new_value: $1
 
 exporters:
+  # Elasticsearch exporter for logs and traces
   elasticsearch:
     endpoints: ["http://elasticsearch:9200"]
     index: "api-monitoring"
-    tls:
-      insecure: true  # For development only, set to false in production
   
-  # Specific index for metrics
-  elasticsearch/metrics:
-    endpoints: ["http://elasticsearch:9200"]
-    index: "api-monitoring-metrics"
-    tls:
-      insecure: true  # For development only, set to false in production
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: dice_roll_app
+    const_labels:
+      service: "dice-roll-app"
+      environment: "development"
   
-  # Adding logging exporter for debugging
+  # Debug exporter
   logging:
     verbosity: detailed
 
@@ -48,8 +48,8 @@ service:
       exporters: [elasticsearch, logging]
     metrics:
       receivers: [otlp]
-      processors: [batch, metricstransform]
-      exporters: [elasticsearch/metrics, logging]
+      processors: [batch]
+      exporters: [prometheus, logging] # Export metrics to Prometheus
     logs:
       receivers: [otlp]
       processors: [batch]
