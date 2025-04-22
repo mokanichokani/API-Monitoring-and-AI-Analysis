@@ -11,6 +11,7 @@ const { PeriodicExportingMetricReader, MeterProvider } = require('@opentelemetry
 const { LoggerProvider, SimpleLogRecordProcessor } = require('@opentelemetry/sdk-logs');
 const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumentations-node');
 const winston = require('winston');
+const ecsFormat = require('@elastic/ecs-winston-format');
 
 // Enable debugging
 opentelemetry.diag.setLogger(new opentelemetry.DiagConsoleLogger(), opentelemetry.DiagLogLevel.INFO);
@@ -73,13 +74,10 @@ const loggerProvider = new LoggerProvider({
 });
 loggerProvider.addLogRecordProcessor(new SimpleLogRecordProcessor(logExporter));
 
-// Configure Winston logger
+// Configure Winston logger with ECS format
 const logger = winston.createLogger({
   level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
+  format: ecsFormat({ convertReqRes: true }), // Use ECS format for Elasticsearch/APM
   defaultMeta: { service: 'dice-roll-app' },
   transports: [
     new winston.transports.Console(),

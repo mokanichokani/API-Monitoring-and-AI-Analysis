@@ -28,6 +28,14 @@ exporters:
     endpoints: ["http://elasticsearch:9200"]
     index: "api-monitoring"
   
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: dice_roll_app
+    const_labels:
+      service: "dice-roll-app"
+      environment: "development"
+  
   # Debug exporter
   logging:
     verbosity: detailed
@@ -41,7 +49,7 @@ service:
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging] # Only use logging for metrics since Elasticsearch doesn't support them
+      exporters: [prometheus, logging] # Export metrics to Prometheus
     logs:
       receivers: [otlp]
       processors: [batch]
