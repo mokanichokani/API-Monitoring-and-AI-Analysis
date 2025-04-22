@@ -11,46 +11,45 @@ processors:
     timeout: 1s
     send_batch_size: 1024
   
-  # Add metric name/description as fields
-  metricstransform:
-    transforms:
-      - include: .*
-        match_type: regexp
-        action: update
-        operations:
-          - action: add_label
-            new_label: metric_name
-            new_value: $1
+  # Add resource processor to ensure service name is properly propagated
+  resource:
+    attributes:
+      - key: service.name
+        action: upsert
+        value: "bank-api"
 
 exporters:
-  # Elasticsearch exporter for logs and traces
-  elasticsearch:
+  # Elasticsearch exporter - separate configuration for logs and traces
+  elasticsearch/traces:
     endpoints: ["http://elasticsearch:9200"]
-    index: "api-monitoring"
+    traces_index: "traces-bank"
+  
+  elasticsearch/logs:
+    endpoints: ["http://elasticsearch:9200"]
+    logs_index: "banking-logs"
   
   # Prometheus exporter for metrics
   prometheus:
     endpoint: 0.0.0.0:8889
-    namespace: dice_roll_app
-    const_labels:
-      service: "dice-roll-app"
-      environment: "development"
+    namespace: bank_api
   
   # Debug exporter
   logging:
     verbosity: detailed
+    sampling_initial: 1
+    sampling_thereafter: 1
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
-      exporters: [elasticsearch, logging]
+      processors: [batch, resource]
+      exporters: [elasticsearch/traces, logging]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [prometheus, logging] # Export metrics to Prometheus
+      exporters: [prometheus, logging]
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [elasticsearch, logging] 
+      exporters: [elasticsearch/logs, logging] 

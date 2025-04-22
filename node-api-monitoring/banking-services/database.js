@@ -10,6 +10,36 @@ const db = {
     { id: '3', name: 'Robert Johnson', email: 'robert@example.com', accountNumber: '10003', balance: 12000 }
   ],
   
+  accounts: [
+    {
+      accountNumber: '10001',
+      customerId: '1',
+      type: 'checking',
+      balance: 5000,
+      status: 'active',
+      createdAt: new Date(Date.now() - 86400000 * 30).toISOString(),
+      updatedAt: new Date(Date.now() - 86400000).toISOString()
+    },
+    {
+      accountNumber: '10002',
+      customerId: '2',
+      type: 'savings',
+      balance: 7500,
+      status: 'active',
+      createdAt: new Date(Date.now() - 86400000 * 20).toISOString(),
+      updatedAt: new Date(Date.now() - 86400000 * 2).toISOString()
+    },
+    {
+      accountNumber: '10003',
+      customerId: '3',
+      type: 'investment',
+      balance: 12000,
+      status: 'active',
+      createdAt: new Date(Date.now() - 86400000 * 10).toISOString(),
+      updatedAt: new Date(Date.now() - 86400000 * 5).toISOString()
+    }
+  ],
+  
   transactions: [
     { 
       id: 't1', 
@@ -46,6 +76,99 @@ const db = {
     depositTotal: 1000,
     withdrawalTotal: 500,
     transferTotal: 750
+  }
+};
+
+// Account operations
+const accountOperations = {
+  getAccounts: () => {
+    return db.accounts;
+  },
+  
+  getAccountByNumber: (accountNumber) => {
+    return db.accounts.find(a => a.accountNumber === accountNumber);
+  },
+  
+  getAccountsByCustomerId: (customerId) => {
+    return db.accounts.filter(a => a.customerId === customerId);
+  },
+  
+  createAccount: (account) => {
+    db.accounts.push(account);
+    return account;
+  },
+  
+  updateAccountStatus: (accountNumber, status) => {
+    const account = accountOperations.getAccountByNumber(accountNumber);
+    if (account) {
+      account.status = status;
+      account.updatedAt = new Date().toISOString();
+      return account;
+    }
+    return null;
+  },
+  
+  updateAccountBalance: (accountNumber, amount, operation = 'add') => {
+    const account = accountOperations.getAccountByNumber(accountNumber);
+    if (account) {
+      if (operation === 'add') {
+        account.balance += amount;
+      } else if (operation === 'subtract') {
+        account.balance -= amount;
+      } else {
+        return null;
+      }
+      account.updatedAt = new Date().toISOString();
+      return account;
+    }
+    return null;
+  },
+  
+  getAccountStatistics: () => {
+    return {
+      total: db.accounts.length,
+      byType: {
+        checking: db.accounts.filter(a => a.type === 'checking').length,
+        savings: db.accounts.filter(a => a.type === 'savings').length,
+        investment: db.accounts.filter(a => a.type === 'investment').length
+      },
+      byStatus: {
+        active: db.accounts.filter(a => a.status === 'active').length,
+        suspended: db.accounts.filter(a => a.status === 'suspended').length,
+        closed: db.accounts.filter(a => a.status === 'closed').length
+      },
+      totalBalance: db.accounts.reduce((sum, account) => sum + account.balance, 0)
+    };
+  },
+  
+  searchAccounts: (criteria) => {
+    let results = [...db.accounts];
+    
+    if (criteria.query) {
+      const query = criteria.query.toLowerCase();
+      results = results.filter(a => 
+        a.accountNumber.toLowerCase().includes(query) || 
+        a.customerId.toLowerCase().includes(query)
+      );
+    }
+    
+    if (criteria.type) {
+      results = results.filter(a => a.type === criteria.type);
+    }
+    
+    if (criteria.status) {
+      results = results.filter(a => a.status === criteria.status);
+    }
+    
+    if (criteria.minBalance !== undefined) {
+      results = results.filter(a => a.balance >= criteria.minBalance);
+    }
+    
+    if (criteria.maxBalance !== undefined) {
+      results = results.filter(a => a.balance <= criteria.maxBalance);
+    }
+    
+    return results;
   }
 };
 
@@ -90,6 +213,153 @@ const transactionOperations = {
   
   getTransactionsByAccountNumber: (accountNumber) => {
     return db.transactions.filter(t => t.accountNumber === accountNumber);
+  },
+  
+  getAccountTransactions: (filters, pagination = { limit: 10, offset: 0 }) => {
+    let transactions = db.transactions;
+    
+    // Apply filters
+    if (filters.accountNumber) {
+      transactions = transactions.filter(t => 
+        t.accountNumber === filters.accountNumber || 
+        t.targetAccountNumber === filters.accountNumber
+      );
+    }
+    
+    if (filters.accountNumbers && Array.isArray(filters.accountNumbers)) {
+      transactions = transactions.filter(t => 
+        filters.accountNumbers.includes(t.accountNumber) || 
+        filters.accountNumbers.includes(t.targetAccountNumber)
+      );
+    }
+    
+    if (filters.startDate) {
+      transactions = transactions.filter(t => new Date(t.timestamp) >= filters.startDate);
+    }
+    
+    if (filters.endDate) {
+      transactions = transactions.filter(t => new Date(t.timestamp) <= filters.endDate);
+    }
+    
+    if (filters.type) {
+      transactions = transactions.filter(t => t.type === filters.type);
+    }
+    
+    const total = transactions.length;
+    
+    // Apply pagination
+    if (pagination) {
+      const { offset = 0, limit = 10 } = pagination;
+      transactions = transactions.slice(offset, offset + limit);
+    }
+    
+    return { transactions, total };
+  },
+  
+  getCustomerTransactions: (filters, pagination = { limit: 10, offset: 0 }) => {
+    return transactionOperations.getAccountTransactions(filters, pagination);
+  },
+  
+  verifyTransaction: (id) => {
+    const transaction = transactionOperations.getTransactionById(id);
+    
+    if (!transaction) {
+      return { transaction: null, verified: false };
+    }
+    
+    // Perform verification logic based on transaction type
+    let verified = transaction.status === 'completed';
+    
+    // Additional verification for transfers - Check both accounts
+    if (transaction.type === 'transfer') {
+      const sourceAccount = transaction.accountNumber;
+      const destinationAccount = transaction.destinationAccount;
+      
+      // In a real system, we'd perform advanced verification:
+      // - Check that the source account had sufficient funds
+      // - Verify that the destination account received the money
+      // - Confirm transaction timestamps match expected times
+      
+      // For this demo, we'll just check that both accounts exist
+      const sourceExists = customerOperations.getCustomerByAccountNumber(sourceAccount) !== null;
+      const destExists = customerOperations.getCustomerByAccountNumber(destinationAccount) !== null;
+      
+      verified = verified && sourceExists && destExists;
+    }
+    
+    return {
+      transaction,
+      verified,
+      verificationTime: new Date().toISOString()
+    };
+  },
+  
+  getTransactionStatistics: (period = 'day') => {
+    const now = new Date();
+    let startDate;
+    
+    // Calculate start date based on period
+    switch (period) {
+      case 'day':
+        startDate = new Date(now);
+        startDate.setDate(now.getDate() - 1);
+        break;
+      case 'week':
+        startDate = new Date(now);
+        startDate.setDate(now.getDate() - 7);
+        break;
+      case 'month':
+        startDate = new Date(now);
+        startDate.setMonth(now.getMonth() - 1);
+        break;
+      default:
+        startDate = new Date(now);
+        startDate.setDate(now.getDate() - 1);
+    }
+    
+    // Filter transactions by date
+    const periodTransactions = db.transactions.filter(t => 
+      new Date(t.timestamp) >= startDate && new Date(t.timestamp) <= now
+    );
+    
+    // Calculate statistics
+    const depositTransactions = periodTransactions.filter(t => t.type === 'deposit');
+    const withdrawalTransactions = periodTransactions.filter(t => t.type === 'withdrawal');
+    const transferTransactions = periodTransactions.filter(t => t.type === 'transfer');
+    
+    const totalTransactions = periodTransactions.length;
+    const totalAmount = periodTransactions.reduce((sum, t) => sum + t.amount, 0);
+    
+    const depositTotal = depositTransactions.reduce((sum, t) => sum + t.amount, 0);
+    const withdrawalTotal = withdrawalTransactions.reduce((sum, t) => sum + t.amount, 0);
+    const transferTotal = transferTransactions.reduce((sum, t) => sum + t.amount, 0);
+    
+    return {
+      period,
+      startDate: startDate.toISOString(),
+      endDate: now.toISOString(),
+      totalTransactions,
+      totalAmount,
+      byType: {
+        deposit: {
+          count: depositTransactions.length,
+          total: depositTotal
+        },
+        withdrawal: {
+          count: withdrawalTransactions.length,
+          total: withdrawalTotal
+        },
+        transfer: {
+          count: transferTransactions.length,
+          total: transferTotal
+        }
+      },
+      byStatus: {
+        completed: periodTransactions.filter(t => t.status === 'completed').length,
+        pending: periodTransactions.filter(t => t.status === 'pending').length,
+        failed: periodTransactions.filter(t => t.status === 'failed').length
+      }
+    };
   },
   
   createTransaction: (transaction) => {
@@ -280,5 +550,6 @@ const analyticsOperations = {
 module.exports = {
   customerOperations,
   transactionOperations,
-  analyticsOperations
+  analyticsOperations,
+  accountOperations
 }; 

@@ -47,7 +47,7 @@ app.use((req, res, next) => {
   // Add trace context to response headers
   res.on('finish', () => {
     const duration = (Date.now() - startTime) / 1000; // seconds
-    metrics.metrics.requestDurationHistogram.record(duration, {
+    metrics.requestDurationHistogram.record(duration, {
       service: 'account-service',
       method: req.method,
       path: req.path,
@@ -96,7 +96,7 @@ app.get('/api/accounts', (req, res) => {
       stack: error.stack, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'account-service', operation: 'getAccounts' });
+    metrics.errorCounter.add(1, { service: 'account-service', operation: 'getAccounts' });
     res.status(500).json({ error: 'Failed to get accounts' });
   }
 });
@@ -122,7 +122,7 @@ app.get('/api/accounts/:accountNumber', (req, res) => {
       accountNumber, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'account-service', operation: 'getAccount' });
+    metrics.errorCounter.add(1, { service: 'account-service', operation: 'getAccount' });
     res.status(500).json({ error: 'Failed to get account' });
   }
 });
@@ -190,7 +190,7 @@ app.post('/api/accounts', async (req, res) => {
         
         const latency = Date.now() - startTime;
         
-        metrics.metrics.serviceCallDurationHistogram.record(latency / 1000, {
+        metrics.serviceCallDurationHistogram.record(latency / 1000, {
           service: 'account-service',
           target_service: 'customer-service',
           operation: 'getCustomer',
@@ -205,7 +205,7 @@ app.post('/api/accounts', async (req, res) => {
         });
       } catch (serviceError) {
         // Record the failed service call
-        metrics.metrics.serviceCallErrorCounter.add(1, {
+        metrics.serviceCallErrorCounter.add(1, {
           service: 'account-service',
           target_service: 'customer-service',
           operation: 'getCustomer',
@@ -243,7 +243,7 @@ app.post('/api/accounts', async (req, res) => {
     });
     
     // Record metrics for account creation
-    metrics.metrics.accountCounter.add(1, {
+    metrics.accountCounter.add(1, {
       service: 'account-service',
       type,
       environment: 'hybrid'
@@ -271,7 +271,7 @@ app.post('/api/accounts', async (req, res) => {
       requestId: req.requestId
     });
     
-    metrics.metrics.errorCounter.add(1, {
+    metrics.errorCounter.add(1, {
       service: 'account-service',
       operation: 'createAccount',
       environment: 'hybrid'
@@ -312,7 +312,7 @@ app.patch('/api/accounts/:accountNumber/status', (req, res) => {
     });
     
     // Record status change metrics
-    metrics.metrics.accountStatusChangeCounter.add(1, {
+    metrics.accountStatusChangeCounter.add(1, {
       service: 'account-service',
       previousStatus: account.status,
       newStatus: status,
@@ -333,7 +333,7 @@ app.patch('/api/accounts/:accountNumber/status', (req, res) => {
       requestId: req.requestId
     });
     
-    metrics.metrics.errorCounter.add(1, {
+    metrics.errorCounter.add(1, {
       service: 'account-service',
       operation: 'updateAccountStatus',
       environment: 'hybrid'
@@ -389,7 +389,7 @@ app.get('/api/customers/:customerId/accounts', (req, res) => {
       requestId: req.requestId
     });
     
-    metrics.metrics.errorCounter.add(1, {
+    metrics.errorCounter.add(1, {
       service: 'account-service',
       operation: 'getCustomerAccounts',
       environment: 'hybrid'
@@ -431,7 +431,7 @@ app.get('/api/accounts/:accountNumber/balance', (req, res) => {
       requestId: req.requestId
     });
     
-    metrics.metrics.errorCounter.add(1, {
+    metrics.errorCounter.add(1, {
       service: 'account-service',
       operation: 'getAccountBalance',
       environment: 'hybrid'
@@ -515,7 +515,7 @@ app.post('/api/accounts/transfer', (req, res) => {
       });
       
       // Record insufficient funds metric
-      metrics.metrics.insufficientFundsCounter.add(1, {
+      metrics.insufficientFundsCounter.add(1, {
         service: 'account-service',
         operation: 'transfer',
         environment: 'hybrid'
@@ -560,19 +560,19 @@ app.post('/api/accounts/transfer', (req, res) => {
     const processingTime = Date.now() - processingStartTime;
     
     // Record metrics
-    metrics.metrics.transferProcessingTime.record(processingTime / 1000, {
+    metrics.transferProcessingTime.record(processingTime / 1000, {
       service: 'account-service',
       status: 'success',
       environment: 'hybrid'
     });
     
-    metrics.metrics.transferCounter.add(1, {
+    metrics.transferCounter.add(1, {
       service: 'account-service',
       status: 'success',
       environment: 'hybrid'
     });
     
-    metrics.metrics.transferAmountSum.record(amount, {
+    metrics.transferAmountSum.record(amount, {
       service: 'account-service',
       environment: 'hybrid'
     });
@@ -611,7 +611,7 @@ app.post('/api/accounts/transfer', (req, res) => {
       requestId: req.requestId
     });
     
-    metrics.metrics.errorCounter.add(1, {
+    metrics.errorCounter.add(1, {
       service: 'account-service',
       operation: 'transfer',
       environment: 'hybrid'
@@ -637,7 +637,7 @@ app.get('/api/accounts/statistics', (req, res) => {
       requestId: req.requestId
     });
     
-    metrics.metrics.errorCounter.add(1, {
+    metrics.errorCounter.add(1, {
       service: 'account-service',
       operation: 'getAccountStatistics',
       environment: 'hybrid'
@@ -679,7 +679,7 @@ app.get('/api/accounts/search', (req, res) => {
       requestId: req.requestId
     });
     
-    metrics.metrics.errorCounter.add(1, {
+    metrics.errorCounter.add(1, {
       service: 'account-service',
       operation: 'searchAccounts',
       environment: 'hybrid'

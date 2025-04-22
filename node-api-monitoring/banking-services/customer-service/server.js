@@ -46,12 +46,12 @@ app.use((req, res, next) => {
   // Add trace context to response headers
   res.on('finish', () => {
     const duration = (Date.now() - startTime) / 1000; // seconds
-    metrics.metrics.requestDurationHistogram.record(duration, {
+    metrics.requestDurationHistogram.record(duration, {
       service: 'customer-service',
       method: req.method,
       path: req.path,
       status_code: res.statusCode.toString(),
-      environment: 'cloud'
+      environment: 'hybrid'
     });
 
     logger.info('Request completed', {
@@ -95,7 +95,10 @@ app.get('/api/customers', (req, res) => {
       stack: error.stack, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-service', operation: 'getCustomers' });
+    metrics.errorCounter.add(1, { 
+      service: 'customer-service', 
+      operation: 'getCustomers' 
+    });
     res.status(500).json({ error: 'Failed to get customers' });
   }
 });
@@ -122,7 +125,10 @@ app.get('/api/customers/:id', (req, res) => {
       customerId: req.params.id, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-service', operation: 'getCustomer' });
+    metrics.errorCounter.add(1, { 
+      service: 'customer-service', 
+      operation: 'getCustomer' 
+    });
     res.status(500).json({ error: 'Failed to get customer' });
   }
 });
@@ -161,7 +167,7 @@ app.post('/api/customers', (req, res) => {
     });
     
     // Record metrics for customer creation
-    metrics.metrics.customerCreationCounter.add(1, { 
+    metrics.customerCreationCounter.add(1, { 
       service: 'customer-service',
       environment: 'cloud'
     });
@@ -184,7 +190,10 @@ app.post('/api/customers', (req, res) => {
       email, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-service', operation: 'createCustomer' });
+    metrics.errorCounter.add(1, { 
+      service: 'customer-service', 
+      operation: 'createCustomer' 
+    });
     res.status(500).json({ error: 'Failed to create customer' });
   }
 });
@@ -247,7 +256,10 @@ app.put('/api/customers/:id', (req, res) => {
       customerId: id, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-service', operation: 'updateCustomer' });
+    metrics.errorCounter.add(1, { 
+      service: 'customer-service', 
+      operation: 'updateCustomer' 
+    });
     res.status(500).json({ error: 'Failed to update customer' });
   }
 });
@@ -278,7 +290,7 @@ app.delete('/api/customers/:id', (req, res) => {
       const latency = Date.now() - startTime;
       
       // Record the service call metrics
-      metrics.metrics.serviceCallDurationHistogram.record(latency / 1000, {
+      metrics.serviceCallDurationHistogram.record(latency / 1000, {
         service: 'customer-service',
         target_service: 'account-service',
         operation: 'getCustomerAccounts',
@@ -312,7 +324,7 @@ app.delete('/api/customers/:id', (req, res) => {
     })
     .catch(error => {
       // Record the failed service call
-      metrics.metrics.serviceCallErrorCounter.add(1, {
+      metrics.serviceCallErrorCounter.add(1, {
         service: 'customer-service',
         target_service: 'account-service',
         operation: 'getCustomerAccounts',
@@ -337,7 +349,10 @@ app.delete('/api/customers/:id', (req, res) => {
       customerId: id, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-service', operation: 'deleteCustomer' });
+    metrics.errorCounter.add(1, { 
+      service: 'customer-service', 
+      operation: 'deleteCustomer' 
+    });
     res.status(500).json({ error: 'Failed to delete customer' });
   }
 });
@@ -369,7 +384,7 @@ app.get('/api/customers/:id/accounts', async (req, res) => {
       const latency = Date.now() - startTime;
       
       // Record the service call metrics
-      metrics.metrics.serviceCallDurationHistogram.record(latency / 1000, {
+      metrics.serviceCallDurationHistogram.record(latency / 1000, {
         service: 'customer-service',
         target_service: 'account-service',
         operation: 'getCustomerAccounts',
@@ -386,7 +401,7 @@ app.get('/api/customers/:id/accounts', async (req, res) => {
       res.json(accounts);
     } catch (axiosError) {
       // Record the failed service call
-      metrics.metrics.serviceCallErrorCounter.add(1, {
+      metrics.serviceCallErrorCounter.add(1, {
         service: 'customer-service',
         target_service: 'account-service',
         operation: 'getCustomerAccounts',
@@ -412,7 +427,10 @@ app.get('/api/customers/:id/accounts', async (req, res) => {
       customerId: id, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-service', operation: 'getCustomerAccounts' });
+    metrics.errorCounter.add(1, { 
+      service: 'customer-service', 
+      operation: 'getCustomerAccounts' 
+    });
     res.status(500).json({ error: 'Failed to get customer accounts' });
   }
 });
@@ -458,7 +476,7 @@ app.post('/api/customers/:id/accounts', async (req, res) => {
       const latency = Date.now() - startTime;
       
       // Record the service call metrics
-      metrics.metrics.serviceCallDurationHistogram.record(latency / 1000, {
+      metrics.serviceCallDurationHistogram.record(latency / 1000, {
         service: 'customer-service',
         target_service: 'account-service',
         operation: 'createAccount',
@@ -476,7 +494,7 @@ app.post('/api/customers/:id/accounts', async (req, res) => {
       res.status(201).json(response.data);
     } catch (axiosError) {
       // Record the failed service call
-      metrics.metrics.serviceCallErrorCounter.add(1, {
+      metrics.serviceCallErrorCounter.add(1, {
         service: 'customer-service',
         target_service: 'account-service',
         operation: 'createAccount',
@@ -506,7 +524,10 @@ app.post('/api/customers/:id/accounts', async (req, res) => {
       initialDeposit, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-service', operation: 'createCustomerAccount' });
+    metrics.errorCounter.add(1, { 
+      service: 'customer-service', 
+      operation: 'createCustomerAccount' 
+    });
     res.status(500).json({ error: 'Failed to create account for customer' });
   }
 });
@@ -537,7 +558,10 @@ app.get('/api/customers/search', (req, res) => {
       term, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-service', operation: 'searchCustomers' });
+    metrics.errorCounter.add(1, { 
+      service: 'customer-service', 
+      operation: 'searchCustomers' 
+    });
     res.status(500).json({ error: 'Failed to search customers' });
   }
 });
@@ -580,7 +604,7 @@ app.get('/api/customers/:id/profile', async (req, res) => {
       const latency = Date.now() - startTime;
       
       // Record the service call metrics
-      metrics.metrics.serviceCallDurationHistogram.record(latency / 1000, {
+      metrics.serviceCallDurationHistogram.record(latency / 1000, {
         service: 'customer-service',
         target_service: 'account-service',
         operation: 'getCustomerAccounts',
@@ -616,7 +640,7 @@ app.get('/api/customers/:id/profile', async (req, res) => {
       res.json(profile);
     } catch (axiosError) {
       // Record the failed service call
-      metrics.metrics.serviceCallErrorCounter.add(1, {
+      metrics.serviceCallErrorCounter.add(1, {
         service: 'customer-service',
         target_service: 'account-service',
         operation: 'getCustomerAccounts',
@@ -647,7 +671,10 @@ app.get('/api/customers/:id/profile', async (req, res) => {
       customerId: id, 
       requestId: req.requestId 
     });
-    metrics.metrics.errorCounter.add(1, { service: 'customer-service', operation: 'getCustomerProfile' });
+    metrics.errorCounter.add(1, { 
+      service: 'customer-service', 
+      operation: 'getCustomerProfile' 
+    });
     res.status(500).json({ error: 'Failed to get customer profile' });
   }
 });
