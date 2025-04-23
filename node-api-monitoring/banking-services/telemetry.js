@@ -229,6 +229,52 @@ function initTelemetry(serviceName, environment) {
     unit: 's',
   });
 
+  // --- ANOMALY DETECTION METRICS ---
+  // 1. Response Time Anomaly Detection Metrics
+  const routeLatencyHistogram = meter.createHistogram('bank.route_latency_seconds', {
+    description: 'API route-specific latency measurements for anomaly detection',
+    unit: 's',
+  });
+
+  const crossServiceLatencyHistogram = meter.createHistogram('bank.cross_service_latency_seconds', {
+    description: 'Latency of calls between services across environments',
+    unit: 's',
+  });
+
+  const baselineLatencyGauge = meter.createUpDownCounter('bank.baseline_latency_seconds', {
+    description: 'Rolling baseline latency for comparison',
+    unit: 's',
+  });
+
+  // 2. Error Anomaly Detection Metrics
+  const categorizedErrorCounter = meter.createCounter('bank.errors_categorized_total', {
+    description: 'Categorized error counts for anomaly detection',
+    unit: '1',
+  });
+
+  const errorRateGauge = meter.createUpDownCounter('bank.error_rate', {
+    description: 'Error rate as percentage of total requests',
+    unit: '%',
+  });
+
+  // 3. Pattern Change Detection Metrics
+  const periodicLatencySummary = meter.createHistogram('bank.periodic_latency_summary', {
+    description: 'Periodic (hourly) latency summary for trend analysis',
+    unit: 's',
+  });
+
+  // 4. Predictive Failure Metrics
+  const earlyWarningSignalsCounter = meter.createCounter('bank.early_warning_signals', {
+    description: 'Count of potential early warning signals for failures',
+    unit: '1',
+  });
+
+  const resourceUtilizationGauge = meter.createUpDownCounter('bank.resource_utilization', {
+    description: 'Resource utilization metrics for capacity prediction',
+    unit: '%',
+  });
+
+  // Keep existing metrics
   const transactionValueCounter = meter.createCounter('bank.transaction_value_total', {
     description: 'Total value of transactions processed',
     unit: 'USD',
@@ -321,7 +367,15 @@ function initTelemetry(serviceName, environment) {
       serviceCallErrorCounter,
       transactionProcessingTime,
       transactionCounter,
-      transactionAmountSum
+      transactionAmountSum,
+      routeLatencyHistogram,
+      crossServiceLatencyHistogram,
+      baselineLatencyGauge,
+      categorizedErrorCounter,
+      errorRateGauge,
+      periodicLatencySummary,
+      earlyWarningSignalsCounter,
+      resourceUtilizationGauge
     },
     sdk,
     loggerProvider

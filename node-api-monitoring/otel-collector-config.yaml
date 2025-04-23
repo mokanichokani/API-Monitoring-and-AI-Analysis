@@ -20,6 +20,32 @@ processors:
         action: keep
       - key: deployment.environment
         action: keep
+  
+  # Add memory limiter to prevent OOM issues during anomaly spikes
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  
+  # Add metrics transformer for cleaner anomaly data 
+  # This helps with correcting units and quantiles in our histograms
+  metricstransform:
+    transforms:
+      - include: bank.route_latency_seconds
+        action: update
+        operations:
+          - action: update_unit
+            new_unit: s
+      - include: bank.cross_service_latency_seconds
+        action: update
+        operations:
+          - action: update_unit
+            new_unit: s
+      - include: bank.baseline_latency_seconds
+        action: update
+        operations:
+          - action: update_unit
+            new_unit: s
 
 exporters:
   # Simplified Elasticsearch exporter configuration for traces
@@ -41,11 +67,27 @@ exporters:
     timeout: 120s
     tls:
       insecure: true
+    # Add log specific settings for anomalies
+    mapping:
+      severity:
+        type: integer
+        ignore_above: 256
+      service.name:
+        type: keyword
+      environment:
+        type: keyword
+      anomaly_detected:
+        type: boolean
   
-  # Prometheus exporter for metrics
+  # Prometheus exporter for metrics - enhanced for anomaly detection
   prometheus:
     endpoint: 0.0.0.0:8889
-    namespace: bank_api
+    namespace: bank
+    send_timestamps: true
+    metric_expiration: 180m
+    enable_open_metrics: true
+    resource_to_telemetry_conversion:
+      enabled: true
   
   # Debug exporter with more verbose options
   logging:
@@ -60,17 +102,20 @@ service:
       level: debug
       development: true
       encoding: console
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
 
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch, resource]
+      processors: [memory_limiter, batch, resource]
       exporters: [elasticsearch/traces, logging]
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      processors: [memory_limiter, metricstransform, batch, resource]
       exporters: [prometheus, logging]
     logs:
       receivers: [otlp]
-      processors: [batch, resource]
+      processors: [memory_limiter, batch, resource]
       exporters: [elasticsearch/logs, logging] 

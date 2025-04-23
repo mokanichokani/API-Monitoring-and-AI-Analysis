@@ -9,15 +9,23 @@ const bodyParser = require('body-parser');
 const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
 const { customerOperations } = require('../database');
+const { createTelemetryMiddleware } = require('../middleware/telemetry-middleware');
 
 // Constants
 const PORT = 3003;
 const app = express();
 const ACCOUNT_SERVICE_URL = process.env.ACCOUNT_SERVICE_URL || 'http://localhost:3002';
 
+// Store environment and service name for context
+app.set('environment', 'cloud');
+app.set('serviceName', 'customer-service');
+
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
+
+// Add anomaly detection telemetry middleware
+app.use(createTelemetryMiddleware(metrics));
 
 // Request tracking middleware
 app.use((req, res, next) => {
@@ -282,7 +290,9 @@ app.delete('/api/customers/:id', (req, res) => {
     axios.get(`${ACCOUNT_SERVICE_URL}/api/customers/${id}/accounts`, {
       headers: {
         'X-Request-ID': req.requestId,
-        'X-Session-ID': req.sessionId
+        'X-Session-ID': req.sessionId,
+        'X-Source-Service': 'customer-service',
+        'X-Source-Environment': 'cloud'
       }
     })
     .then(response => {
@@ -376,7 +386,9 @@ app.get('/api/customers/:id/accounts', async (req, res) => {
       const response = await axios.get(`${ACCOUNT_SERVICE_URL}/api/customers/${id}/accounts`, {
         headers: {
           'X-Request-ID': req.requestId,
-          'X-Session-ID': req.sessionId
+          'X-Session-ID': req.sessionId,
+          'X-Source-Service': 'customer-service',
+          'X-Source-Environment': 'cloud'
         }
       });
       
@@ -469,7 +481,9 @@ app.post('/api/customers/:id/accounts', async (req, res) => {
       }, {
         headers: {
           'X-Request-ID': req.requestId,
-          'X-Session-ID': req.sessionId
+          'X-Session-ID': req.sessionId,
+          'X-Source-Service': 'customer-service',
+          'X-Source-Environment': 'cloud'
         }
       });
       
