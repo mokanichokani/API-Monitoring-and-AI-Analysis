@@ -59,6 +59,18 @@ exporters:
     resource_to_telemetry_conversion:
       enabled: true
   
+  # Add Loki exporter for logs
+  loki:
+    endpoint: "http://loki:3100/loki/api/v1/push"
+    tls:
+      insecure: true
+  
+  # Add Tempo exporter for traces
+  otlp/tempo:
+    endpoint: "tempo:4317"
+    tls:
+      insecure: true
+  
   # Debug exporter with more verbose options
   logging:
     verbosity: detailed
@@ -80,7 +92,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch, resource]
-      exporters: [elasticsearch/traces, logging]
+      exporters: [elasticsearch/traces, otlp/tempo, logging]
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch, resource]
@@ -88,4 +100,4 @@ service:
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch, resource]
-      exporters: [elasticsearch/logs, logging] 
+      exporters: [elasticsearch/logs, loki, logging] 
