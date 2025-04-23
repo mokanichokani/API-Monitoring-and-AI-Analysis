@@ -36,11 +36,11 @@ function initTelemetry(serviceName, environment) {
     [ATTR_SERVICE_NAME]: serviceName,
     [ATTR_SERVICE_VERSION]: '1.0.0',
     [ATTR_DEPLOYMENT_ENVIRONMENT]: environment,
-    'service.name': 'bank-api', // Fix to match exactly what's in the collector config
+    'service.name': serviceName,
     'service.instance.id': `${serviceName}-${Math.random().toString(36).substring(2, 12)}`,
     'host.type': environment
   });
-  console.log(`[TELEMETRY DEBUG] Resource created with service.name: 'bank-api'`);
+  console.log(`[TELEMETRY DEBUG] Resource created with service.name: '${serviceName}'`);
 
   // Configure OTLP exporters to send to OpenTelemetry Collector
   const traceExporter = new OTLPTraceExporter({
@@ -157,7 +157,7 @@ function initTelemetry(serviceName, environment) {
           body: message,
           attributes: { 
             ...meta, 
-            'service.name': 'bank-api',
+            'service.name': serviceName,
             'log.origin': 'winston-wrapper'
           }
         });
@@ -177,13 +177,13 @@ function initTelemetry(serviceName, environment) {
       new HttpInstrumentation({
         // Add service name as an attribute to every span
         requestHook: (span) => {
-          span.setAttribute('service.name', 'bank-api');
+          span.setAttribute('service.name', serviceName);
         }
       }),
       new ExpressInstrumentation({
         // Add service name as an attribute to every span
         requestHook: (span) => {
-          span.setAttribute('service.name', 'bank-api');
+          span.setAttribute('service.name', serviceName);
         }
       })
     ],
@@ -212,7 +212,7 @@ function initTelemetry(serviceName, environment) {
     directLogger.emit({
       severityText: 'info',
       body: 'Direct OpenTelemetry test log message',
-      attributes: { test: true, method: 'direct', 'service.name': 'bank-api' }
+      attributes: { test: true, method: 'direct', 'service.name': serviceName }
     });
     
     console.log(`[TELEMETRY DEBUG] Test logs sent, check Elasticsearch and collector logs`);

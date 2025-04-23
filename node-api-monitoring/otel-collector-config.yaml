@@ -15,8 +15,11 @@ processors:
   resource:
     attributes:
       - key: service.name
-        action: upsert
-        value: "bank-api"
+        action: keep
+      - key: service.version
+        action: keep
+      - key: deployment.environment
+        action: keep
 
 exporters:
   # Simplified Elasticsearch exporter configuration for traces
