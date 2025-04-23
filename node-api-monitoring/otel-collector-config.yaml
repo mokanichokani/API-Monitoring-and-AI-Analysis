@@ -19,27 +19,45 @@ processors:
         value: "bank-api"
 
 exporters:
-  # Elasticsearch exporter - separate configuration for logs and traces
+  # Simplified Elasticsearch exporter configuration for traces
   elasticsearch/traces:
-    endpoints: ["http://elasticsearch:9200"]
+    endpoints:
+      - "http://elasticsearch:9200"
     traces_index: "traces-bank"
+    # Set very conservative timeout values
+    timeout: 120s
+    tls:
+      insecure: true
   
+  # Simplified Elasticsearch exporter configuration for logs
   elasticsearch/logs:
-    endpoints: ["http://elasticsearch:9200"]
+    endpoints:
+      - "http://elasticsearch:9200"
     logs_index: "banking-logs"
+    # Set very conservative timeout values
+    timeout: 120s
+    tls:
+      insecure: true
   
   # Prometheus exporter for metrics
   prometheus:
     endpoint: 0.0.0.0:8889
     namespace: bank_api
   
-  # Debug exporter
+  # Debug exporter with more verbose options
   logging:
     verbosity: detailed
     sampling_initial: 1
     sampling_thereafter: 1
 
 service:
+  # Enable telemetry collection for the collector itself
+  telemetry:
+    logs:
+      level: debug
+      development: true
+      encoding: console
+
   pipelines:
     traces:
       receivers: [otlp]
@@ -51,5 +69,5 @@ service:
       exporters: [prometheus, logging]
     logs:
       receivers: [otlp]
-      processors: [batch]
+      processors: [batch, resource]
       exporters: [elasticsearch/logs, logging] 

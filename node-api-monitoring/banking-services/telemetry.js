@@ -27,8 +27,9 @@ function initTelemetry(serviceName, environment) {
   serviceName = serviceName || 'bank-api';
   environment = environment || 'development';
   
-  // Enable OpenTelemetry debug logging in development
-  opentelemetry.diag.setLogger(new opentelemetry.DiagConsoleLogger(), opentelemetry.DiagLogLevel.INFO);
+  // Enable OpenTelemetry debug logging in development - set to more verbose level
+  opentelemetry.diag.setLogger(new opentelemetry.DiagConsoleLogger(), opentelemetry.DiagLogLevel.DEBUG);
+  console.log(`[TELEMETRY DEBUG] Initializing telemetry for service: ${serviceName}, environment: ${environment}`);
 
   // Define resource information
   const resource = resourceFromAttributes({
@@ -39,14 +40,16 @@ function initTelemetry(serviceName, environment) {
     'service.instance.id': `${serviceName}-${Math.random().toString(36).substring(2, 12)}`,
     'host.type': environment
   });
+  console.log(`[TELEMETRY DEBUG] Resource created with service.name: 'bank-api'`);
 
   // Configure OTLP exporters to send to OpenTelemetry Collector
   const traceExporter = new OTLPTraceExporter({
     url: 'http://otel-collector:4318/v1/traces', 
     headers: {
-      'X-Service-Name': serviceName // Add service name to headers
+      'X-Service-Name': serviceName
     }
   });
+  console.log(`[TELEMETRY DEBUG] Trace exporter configured with URL: http://otel-collector:4318/v1/traces`);
 
   const metricExporter = new OTLPMetricExporter({
     url: 'http://otel-collector:4318/v1/metrics',
@@ -54,13 +57,16 @@ function initTelemetry(serviceName, environment) {
       'X-Service-Name': serviceName
     }
   });
+  console.log(`[TELEMETRY DEBUG] Metric exporter configured with URL: http://otel-collector:4318/v1/metrics`);
 
   const logExporter = new OTLPLogExporter({
     url: 'http://otel-collector:4318/v1/logs',
     headers: {
       'X-Service-Name': serviceName
-    }
+    },
+    timeoutMillis: 15000
   });
+  console.log(`[TELEMETRY DEBUG] Log exporter configured with URL: http://otel-collector:4318/v1/logs`);
 
   // Initialize MeterProvider
   const meterProvider = new MeterProvider({
@@ -72,18 +78,24 @@ function initTelemetry(serviceName, environment) {
       })
     ]
   });
+  console.log(`[TELEMETRY DEBUG] MeterProvider initialized`);
 
   // Set the global MeterProvider
   opentelemetry.metrics.setGlobalMeterProvider(meterProvider);
 
   // Create a meter to use for instrumentation
   const meter = opentelemetry.metrics.getMeter(serviceName, '1.0.0');
+  console.log(`[TELEMETRY DEBUG] Meter created for service: ${serviceName}`);
 
-  // Initialize LoggerProvider
+  // Initialize LoggerProvider with more detailed configuration
   const loggerProvider = new LoggerProvider({
     resource: resource,
   });
+  console.log(`[TELEMETRY DEBUG] LoggerProvider initialized`);
+
+  // Add the OTLP log processor
   loggerProvider.addLogRecordProcessor(new SimpleLogRecordProcessor(logExporter));
+  console.log(`[TELEMETRY DEBUG] Added OTLP log processor with URL: http://otel-collector:4318/v1/logs`);
 
   // Create a winston logger that includes trace context in logs
   const logger = winston.createLogger({
@@ -104,10 +116,9 @@ function initTelemetry(serviceName, environment) {
           winston.format.simple()
         )
       }),
-      // Note: Logs are collected by the container runtime and visible via 'docker logs'
-      // They appear in Prometheus metrics but are not directly indexed in Elasticsearch
     ]
   });
+  console.log(`[TELEMETRY DEBUG] Winston logger initialized with ECS format`);
 
   // Set up a custom formatter to include trace context
   const addTraceContext = winston.format((info) => {
@@ -127,6 +138,35 @@ function initTelemetry(serviceName, environment) {
     addTraceContext(),
     logger.format
   );
+  console.log(`[TELEMETRY DEBUG] Added trace context to Winston logger`);
+
+  // Wrap Winston logger methods to send logs to OpenTelemetry
+  ['info', 'warn', 'error', 'debug'].forEach(level => {
+    const originalMethod = logger[level];
+    
+    logger[level] = function(message, meta = {}) {
+      // Call the original Winston method
+      originalMethod.call(logger, message, meta);
+      
+      // Also log to OpenTelemetry
+      try {
+        const otelLogger = loggerProvider.getLogger('winston-logger');
+        console.log(`[TELEMETRY DEBUG] Sending log to OTLP: ${level} - ${message}`);
+        otelLogger.emit({
+          severityText: level,
+          body: message,
+          attributes: { 
+            ...meta, 
+            'service.name': 'bank-api',
+            'log.origin': 'winston-wrapper'
+          }
+        });
+      } catch (error) {
+        console.error(`[TELEMETRY ERROR] Failed to emit log to OpenTelemetry: ${error.message}`, error);
+      }
+    };
+  });
+  console.log(`[TELEMETRY DEBUG] Wrapped Winston methods to send logs to OpenTelemetry`);
 
   // Initialize the SDK with tracing
   const sdk = new NodeSDK({
@@ -155,9 +195,28 @@ function initTelemetry(serviceName, environment) {
       ],
     }),
   });
+  console.log(`[TELEMETRY DEBUG] NodeSDK initialized`);
 
   // Start the SDK
   sdk.start();
+  console.log(`[TELEMETRY DEBUG] NodeSDK started`);
+
+  // Create test logs after a delay to confirm setup
+  setTimeout(() => {
+    console.log(`[TELEMETRY DEBUG] Sending test logs`);
+    logger.info('Test log message for Elasticsearch via OpenTelemetry', { test: true });
+    logger.error('Test error message for Elasticsearch via OpenTelemetry', { test: true });
+    
+    // Also log directly via OpenTelemetry for testing
+    const directLogger = loggerProvider.getLogger('direct-test');
+    directLogger.emit({
+      severityText: 'info',
+      body: 'Direct OpenTelemetry test log message',
+      attributes: { test: true, method: 'direct', 'service.name': 'bank-api' }
+    });
+    
+    console.log(`[TELEMETRY DEBUG] Test logs sent, check Elasticsearch and collector logs`);
+  }, 5000);
 
   // Create metric instruments
   const requestCounter = meter.createCounter('bank.http_requests_total', {
@@ -264,7 +323,8 @@ function initTelemetry(serviceName, environment) {
       transactionCounter,
       transactionAmountSum
     },
-    sdk
+    sdk,
+    loggerProvider
   };
 }
 
