@@ -9,15 +9,23 @@ const bodyParser = require('body-parser');
 const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
 const { accountOperations, customerOperations } = require('../database');
+const { createTelemetryMiddleware } = require('../middleware/telemetry-middleware');
 
 // Constants
 const PORT = 3002;
 const app = express();
 const CUSTOMER_SERVICE_URL = process.env.CUSTOMER_SERVICE_URL || 'http://localhost:3003';
 
+// Store environment and service name for context
+app.set('environment', 'hybrid');
+app.set('serviceName', 'account-service');
+
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
+
+// Add anomaly detection telemetry middleware
+app.use(createTelemetryMiddleware(metrics));
 
 // Request tracking middleware
 app.use((req, res, next) => {
@@ -182,7 +190,9 @@ app.post('/api/accounts', async (req, res) => {
         const response = await axios.get(`${CUSTOMER_SERVICE_URL}/api/customers/${customerId}`, {
           headers: {
             'X-Request-ID': req.requestId,
-            'X-Session-ID': req.sessionId
+            'X-Session-ID': req.sessionId,
+            'X-Source-Service': 'account-service',
+            'X-Source-Environment': 'hybrid'
           }
         });
         
