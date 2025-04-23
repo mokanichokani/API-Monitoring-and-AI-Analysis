@@ -214,13 +214,14 @@ services:
 
   # Loki for log storage
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.4.3
     container_name: loki
     ports:
       - "3100:3100"
     command: -config.file=/etc/loki/local-config.yaml
     volumes:
       - ./loki-config.yaml:/etc/loki/local-config.yaml
+      - loki-data:/loki
     networks:
       - elastic
 
@@ -242,6 +243,8 @@ volumes:
   prometheus-data:
     driver: local
   grafana-data:
+    driver: local
+  loki-data:
     driver: local
 
 networks:
