@@ -11,15 +11,12 @@ processors:
     timeout: 1s
     send_batch_size: 1024
   
-  # Add resource processor to ensure service name is properly propagated
+  # Simplify the resource processor to pass through attributes
   resource:
     attributes:
       - key: service.name
-        action: keep
-      - key: service.version
-        action: keep
-      - key: deployment.environment
-        action: keep
+        action: insert
+        value: "banking-services"
   
   # Add memory limiter to prevent OOM issues during anomaly spikes
   memory_limiter:
@@ -27,25 +24,8 @@ processors:
     limit_percentage: 80
     spike_limit_percentage: 25
   
-  # Add metrics transformer for cleaner anomaly data 
-  # This helps with correcting units and quantiles in our histograms
-  metricstransform:
-    transforms:
-      - include: bank.route_latency_seconds
-        action: update
-        operations:
-          - action: update_unit
-            new_unit: s
-      - include: bank.cross_service_latency_seconds
-        action: update
-        operations:
-          - action: update_unit
-            new_unit: s
-      - include: bank.baseline_latency_seconds
-        action: update
-        operations:
-          - action: update_unit
-            new_unit: s
+  # Remove the problematic metricstransform processor
+  # We'll add it back properly later if needed
 
 exporters:
   # Simplified Elasticsearch exporter configuration for traces
@@ -67,17 +47,7 @@ exporters:
     timeout: 120s
     tls:
       insecure: true
-    # Add log specific settings for anomalies
-    mapping:
-      severity:
-        type: integer
-        ignore_above: 256
-      service.name:
-        type: keyword
-      environment:
-        type: keyword
-      anomaly_detected:
-        type: boolean
+    # Remove the problematic mapping section
   
   # Prometheus exporter for metrics - enhanced for anomaly detection
   prometheus:
@@ -88,6 +58,18 @@ exporters:
     enable_open_metrics: true
     resource_to_telemetry_conversion:
       enabled: true
+  
+  # Add Loki exporter for logs
+  loki:
+    endpoint: "http://loki:3100/loki/api/v1/push"
+    tls:
+      insecure: true
+  
+  # Add Tempo exporter for traces
+  otlp/tempo:
+    endpoint: "tempo:4317"
+    tls:
+      insecure: true
   
   # Debug exporter with more verbose options
   logging:
@@ -110,12 +92,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch, resource]
-      exporters: [elasticsearch/traces, logging]
+      exporters: [elasticsearch/traces, otlp/tempo, logging]
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, metricstransform, batch, resource]
+      processors: [memory_limiter, batch, resource]
       exporters: [prometheus, logging]
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch, resource]
-      exporters: [elasticsearch/logs, logging] 
+      exporters: [elasticsearch/logs, loki, logging] 
